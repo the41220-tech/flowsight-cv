@@ -1,0 +1,36 @@
+{
+  "rho_crit": 6.0,
+  "note": "density-alarm threshold = crush density (Itaewon ~6-7.57/m2)",
+  "scenarios": {
+    "oracle": {
+      "recall": 1.0,
+      "gt_peak_density": 7.33,
+      "det_peak_density": 7.65,
+      "undercount_ratio": 0.952,
+      "crush_onset_s": 20.65,
+      "density_alarm_fired": true,
+      "density_alarm_lead_s": -0.4,
+      "multimodal_lead_s": 5.6
+    },
+    "sahi": {
+      "recall": 0.86,
+      "gt_peak_density": 7.33,
+      "det_peak_density": 7.1,
+      "undercount_ratio": 0.818,
+      "crush_onset_s": 20.65,
+      "density_alarm_fired": true,
+      "density_alarm_lead_s": -6.8,
+      "multimodal_lead_s": 5.2
+    },
+    "ft1_drone": {
+      "recall": 0.51,
+      "gt_peak_density": 7.33,
+      "det_peak_density": 4.54,
+      "undercount_ratio": 0.498,
+      "crush_onset_s": 20.65,
+      "density_alarm_fired": false,
+      "density_alarm_lead_s": null,
+      "multimodal_lead_s": 5.2
+    }
+  }
+}
