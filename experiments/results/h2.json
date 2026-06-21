@@ -1,0 +1,23 @@
+{
+  "rho_crit": 6.0,
+  "rise_fraction": 0.5,
+  "crush_onset_s": 20.65000000000016,
+  "peak_density": 7.332444667816162,
+  "rise_times_s": {
+    "terrain": 13.450000000000056,
+    "density": 16.050000000000093,
+    "helbing": 32.250000000000306
+  },
+  "lead_vs_crush_s": {
+    "terrain": 7.2,
+    "density": 4.6,
+    "helbing": -11.6
+  },
+  "terrain_leads_helbing_by_s": 18.8,
+  "ordering_robustness": {
+    "frac_0.3": "terrain -> density -> helbing",
+    "frac_0.4": "terrain -> density -> helbing",
+    "frac_0.5": "terrain -> density -> helbing",
+    "frac_0.6": "terrain -> density -> helbing"
+  }
+}

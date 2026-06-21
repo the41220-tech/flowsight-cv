@@ -1,0 +1,38 @@
+{
+  "N": 200,
+  "depth_rel_noise": 0.03,
+  "methods": {
+    "A_single_homography": {
+      "mean_m": 2.5668664389857123,
+      "median_m": 1.1863049086442699,
+      "p90_m": 8.133571102258157,
+      "mean_on_slope_m": 3.4146484277174545,
+      "valid": 200,
+      "slope_err_reduction_vs_A_%": 0.0
+    },
+    "B_multi_homography": {
+      "mean_m": 3.3677912704200823,
+      "median_m": 1.181914537629881,
+      "p90_m": 7.91530645146109,
+      "mean_on_slope_m": 4.600012805924564,
+      "valid": 200,
+      "slope_err_reduction_vs_A_%": -34.7
+    },
+    "C_terrain_raycast": {
+      "mean_m": 0.655090142355358,
+      "median_m": 5.69287885930194e-14,
+      "p90_m": 3.0760733275491727,
+      "mean_on_slope_m": 0.9098474199379822,
+      "valid": 200,
+      "slope_err_reduction_vs_A_%": 73.4
+    },
+    "D_metric_depth": {
+      "mean_m": 0.6708150298854372,
+      "median_m": 0.5319657710995604,
+      "p90_m": 1.4254646219044769,
+      "mean_on_slope_m": 0.7544485570332188,
+      "valid": 200,
+      "slope_err_reduction_vs_A_%": 77.9
+    }
+  }
+}

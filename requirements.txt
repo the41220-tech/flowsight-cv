@@ -1,0 +1,17 @@
+# --- core (CPU): geometry / physics / sim / experiments 재현에 충분 ---
+numpy>=1.24
+opencv-python-headless>=4.8
+matplotlib>=3.7
+
+# --- models (Colab GPU): 검출/깊이/장애물/VLM ---
+# Colab엔 torch가 사전설치됨. 로컬 GPU면 플랫폼에 맞는 torch를 별도 설치.
+torch>=2.2
+transformers>=4.46
+timm>=1.0
+pillow>=10.0
+accelerate>=0.34
+# 선택: 헝가리안 매칭(생산용 융합), 가속
+scipy>=1.11
+# 선택: Qwen2.5-VL 입력 유틸 / 시각화
+qwen-vl-utils
+supervision>=0.20
