@@ -1,0 +1,33 @@
+{
+  "P_CRIT_1_s2": 0.02,
+  "rho_crit_m2": 6.0,
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "abs_alarm_lead_before_onset_mean_s": 10.47,
+  "precursor_lead_over_helbing_mean_s": -0.73,
+  "slope_representative": {
+    "slope": true,
+    "crush_onset_s": 20.65,
+    "abs_alarm_s": 10.25,
+    "abs_alarm_lead_before_onset_s": 10.4,
+    "helbing_rise25_s": 11.65,
+    "precursor_rise25_s": 12.45,
+    "precursor_lead_over_helbing_s": -0.8,
+    "peak_pressure_1_s2": 0.184,
+    "peak_density_m2": 7.3
+  },
+  "flat": {
+    "slope": false,
+    "crush_onset_s": 22.85,
+    "abs_alarm_s": 11.25,
+    "abs_alarm_lead_before_onset_s": 11.6,
+    "helbing_rise25_s": 19.85,
+    "precursor_rise25_s": null,
+    "precursor_lead_over_helbing_s": null,
+    "peak_pressure_1_s2": 1.742,
+    "peak_density_m2": 10.1
+  }
+}
