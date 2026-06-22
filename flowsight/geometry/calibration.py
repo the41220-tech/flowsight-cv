@@ -152,6 +152,116 @@ class HomographyCalibrator:
 
 
 # --------------------------------------------------------------------------- #
+# Metric-depth ground calibrator (accurate, no surveyed points)
+# --------------------------------------------------------------------------- #
+def intrinsics_from_fov(W: int, H: int, fov_deg: float = 65.0) -> tuple:
+    """Pinhole intrinsics from image size + horizontal FOV. Returns (fx,fy,cx,cy)."""
+    fx = (W / 2.0) / np.tan(np.deg2rad(fov_deg) / 2.0)
+    return fx, fx, W / 2.0, H / 2.0
+
+
+def _fit_plane_ransac(pts, iters=300, thresh=0.15, seed=0):
+    """RANSAC plane n·P = d (|n|=1) on (N,3) points -> (n, d, inlier_mask)."""
+    pts = np.asarray(pts, float)
+    rng = np.random.default_rng(seed)
+    best = (None, None, None, -1)
+    n_pts = len(pts)
+    if n_pts < 3:
+        raise ValueError("need >=3 points to fit a plane")
+    for _ in range(iters):
+        idx = rng.choice(n_pts, 3, replace=False)
+        p1, p2, p3 = pts[idx]
+        nrm = np.cross(p2 - p1, p3 - p1)
+        ln = np.linalg.norm(nrm)
+        if ln < 1e-9:
+            continue
+        nrm = nrm / ln
+        d = float(nrm @ p1)
+        dist = np.abs(pts @ nrm - d)
+        inl = dist < thresh
+        c = int(inl.sum())
+        if c > best[3]:
+            best = (nrm, d, inl, c)
+    n, d, inl, _ = best
+    # least-squares refit on inliers, orient normal toward the camera (origin)
+    q = pts[inl]
+    c = q.mean(0)
+    _, _, Vt = np.linalg.svd(q - c)
+    n = Vt[-1]
+    n = n / np.linalg.norm(n)
+    d = float(n @ c)
+    if d < 0:  # make d>0 so the plane is in front (n points from camera to plane)
+        n, d = -n, -d
+    return n, d, inl
+
+
+class DepthGroundCalibrator:
+    """Pixels -> ACCURATE ground metres from a metric depth map (no survey, no
+    pedestrian-height assumption).
+
+    Works entirely in CAMERA space (no extrinsics needed): a metric monocular
+    depth map (Depth-Anything-V2-Metric) gives each pixel's metric camera-space
+    3-D point; a ground plane is RANSAC-fit to those points; a foot pixel's camera
+    ray is intersected with that plane to get its metric (X,Y) on the ground, and
+    in-plane axes give a 2-D metric map. Scale accuracy depends on the depth
+    model's metric accuracy and the FOV estimate (a wrong FOV scales the map
+    uniformly). This replaces the perspective-naive PedestrianScaleCalibrator.
+    """
+
+    def __init__(self, depth_map, fov_deg: float = 65.0, subsample: int = 8,
+                 ransac_thresh_m: float = 0.15) -> None:
+        dm = np.asarray(depth_map, float)
+        H, W = dm.shape[:2]
+        self.fx, self.fy, self.cx, self.cy = intrinsics_from_fov(W, H, fov_deg)
+        # backproject a subsample of pixels to camera-space metric 3-D
+        ys, xs = np.mgrid[0:H:subsample, 0:W:subsample]
+        u, v = xs.ravel().astype(float), ys.ravel().astype(float)
+        z = dm[ys.ravel(), xs.ravel()]
+        ok = np.isfinite(z) & (z > 0)
+        u, v, z = u[ok], v[ok], z[ok]
+        Pc = np.column_stack([(u - self.cx) * z / self.fx,
+                              (v - self.cy) * z / self.fy, z])
+        self.n, self.d, _ = _fit_plane_ransac(Pc, thresh=ransac_thresh_m)
+        # in-plane orthonormal basis + origin (plane point nearest the camera)
+        a = np.array([1.0, 0.0, 0.0])
+        if abs(self.n @ a) > 0.9:
+            a = np.array([0.0, 1.0, 0.0])
+        self.u_axis = np.cross(self.n, a)
+        self.u_axis /= np.linalg.norm(self.u_axis)
+        self.v_axis = np.cross(self.n, self.u_axis)
+        self.origin = self.d * self.n
+
+    def _ray_dirs(self, uv: np.ndarray) -> np.ndarray:
+        uv = np.atleast_2d(np.asarray(uv, float))
+        return np.column_stack([(uv[:, 0] - self.cx) / self.fx,
+                                (uv[:, 1] - self.cy) / self.fy,
+                                np.ones(len(uv))])
+
+    def _ground_3d(self, uv: np.ndarray) -> np.ndarray:
+        d_cam = self._ray_dirs(uv)
+        denom = d_cam @ self.n
+        denom = np.where(np.abs(denom) < 1e-9, 1e-9, denom)
+        t = self.d / denom
+        return d_cam * t[:, None]  # camera-space 3-D on the ground plane
+
+    def to_ground(self, uv: np.ndarray) -> np.ndarray:
+        P = self._ground_3d(uv) - self.origin
+        return np.column_stack([P @ self.u_axis, P @ self.v_axis])
+
+    def velocity_to_metric(self, uv: np.ndarray, v_px: np.ndarray) -> np.ndarray:
+        uv = np.atleast_2d(np.asarray(uv, float))
+        v_px = np.atleast_2d(np.asarray(v_px, float))
+        return self.to_ground(uv + v_px) - self.to_ground(uv)  # per second (dt=1)
+
+    def area_scale(self, uv: np.ndarray) -> np.ndarray:
+        uv = np.atleast_2d(np.asarray(uv, float))
+        g0 = self.to_ground(uv)
+        gx = self.to_ground(uv + [1.0, 0.0]) - g0
+        gy = self.to_ground(uv + [0.0, 1.0]) - g0
+        return np.abs(gx[:, 0] * gy[:, 1] - gx[:, 1] * gy[:, 0])
+
+
+# --------------------------------------------------------------------------- #
 # tracks_<type>.json frame -> metric arrays
 # --------------------------------------------------------------------------- #
 def tracks_to_metric(

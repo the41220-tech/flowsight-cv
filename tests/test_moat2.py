@@ -176,6 +176,47 @@ def test_moat_monitor_terrain_channel_active_on_slope():
 
 
 # --------------------------------------------------------------------------- #
+# 5. Depth-ground calibrator (accurate metric scale from a metric depth map)
+# --------------------------------------------------------------------------- #
+def test_depth_ground_calibrator_metric_recovery():
+    from flowsight.geometry.calibration import (
+        DepthGroundCalibrator,
+        intrinsics_from_fov,
+    )
+
+    W, H, fov = 640, 480, 65.0
+    fx, fy, cx, cy = intrinsics_from_fov(W, H, fov)
+    # a tilted ground plane in camera space: n·P = d
+    n_true = np.array([0.0, -0.6, 0.8])
+    n_true /= np.linalg.norm(n_true)
+    d_true = 8.0
+    # synthetic dense metric depth map = ray-plane intersection Z per pixel
+    ys, xs = np.mgrid[0:H, 0:W]
+    dcam = np.stack([(xs - cx) / fx, (ys - cy) / fy, np.ones_like(xs, float)], -1)
+    denom = dcam @ n_true
+    t = np.where(np.abs(denom) > 1e-6, d_true / denom, -1.0)
+    Z = np.where(t > 0, t, 0.0)  # camera-Z (=t since dcam_z=1); invalid->0
+
+    cal = DepthGroundCalibrator(Z, fov_deg=fov, subsample=8)
+
+    foot = np.array([[200, 380], [440, 380], [320, 300], [320, 440]], float)
+    dc = np.column_stack([(foot[:, 0] - cx) / fx, (foot[:, 1] - cy) / fy,
+                          np.ones(len(foot))])
+    Ptrue = dc * (d_true / (dc @ n_true))[:, None]  # true 3-D ground points
+
+    def pdist(P):
+        return np.array([np.linalg.norm(P[i] - P[j])
+                         for i in range(len(P)) for j in range(i + 1, len(P))])
+
+    g = cal.to_ground(foot)
+    rel = np.abs(pdist(g) - pdist(Ptrue)) / pdist(Ptrue)
+    assert rel.max() < 0.02, rel  # metric distances preserved within 2%
+    # velocity sane: 10 px/s horizontal -> finite, > 0 m/s
+    vm = cal.velocity_to_metric(foot[:1], np.array([[10.0, 0.0]]))
+    assert np.isfinite(vm).all() and np.linalg.norm(vm) > 0
+
+
+# --------------------------------------------------------------------------- #
 # plain-python fallback runner (no pytest needed)
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":

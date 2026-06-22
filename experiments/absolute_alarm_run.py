@@ -37,6 +37,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from flowsight.geometry.calibration import (
+    DepthGroundCalibrator,
     HomographyCalibrator,
     PedestrianScaleCalibrator,
     metric_bounds,
@@ -67,6 +68,11 @@ def load_font(sz: int):
 
 
 def build_calibrator(args):
+    if getattr(args, "depth_npz", None):
+        dm = np.load(args.depth_npz)
+        cal = DepthGroundCalibrator(dm, fov_deg=float(args.fov_deg))
+        return cal, "metric-depth ground (fov=%.0f, plane d=%.2fm)" % (
+            args.fov_deg, cal.d)
     if args.homography:
         rows = [r for r in args.homography.replace("\n", ";").split(";") if r.strip()]
         img, wld = [], []
@@ -261,6 +267,10 @@ if __name__ == "__main__":
     ap.add_argument("--pmax", type=float, default=None, help="absolute full-scale (1/s^2)")
     ap.add_argument("--mpp", type=float, default=None, help="metres per pixel (uniform)")
     ap.add_argument("--person-px", type=float, default=None, help="median person height in px")
+    ap.add_argument("--depth-npz", type=str, default=None,
+                    help="metric depth map .npy -> ACCURATE ground scale (no survey)")
+    ap.add_argument("--fov-deg", type=float, default=65.0,
+                    help="horizontal FOV (deg) for depth-ground intrinsics")
     ap.add_argument("--homography", type=str, default=None,
                     help="'u,v,X,Y; ...' >=4 image<->ground(m) points")
     a = ap.parse_args()
