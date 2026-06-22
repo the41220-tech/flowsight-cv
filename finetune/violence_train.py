@@ -44,7 +44,12 @@ def train_chunk(model_path: str, data: str, epochs: int, imgsz: int, batch: int,
             project=project, name=name, exist_ok=True, patience=100, seed=0,
             cos_lr=True, plots=False, verbose=False)
     sd = Path(m.trainer.save_dir)
-    top1 = float(getattr(getattr(m.trainer, "metrics", None), "top1", 0.0) or 0.0)
+    # classification top-1 lives in trainer.metrics (a dict on ultralytics-cls)
+    met = getattr(m.trainer, "metrics", None)
+    if isinstance(met, dict):
+        top1 = float(met.get("metrics/accuracy_top1", met.get("top1", 0.0)) or 0.0)
+    else:
+        top1 = float(getattr(met, "top1", 0.0) or 0.0)
     return str(sd / "weights" / "best.pt"), str(sd / "weights" / "last.pt"), top1
 
 

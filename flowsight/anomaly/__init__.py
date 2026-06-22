@@ -12,3 +12,5 @@ from .detectors import (  # noqa: F401
     RadialDivergenceDetector,
     TerrorComposite,
 )
+from .narrate import narrate  # noqa: F401
+from .violence import ViolenceDetector, _fight_index  # noqa: F401

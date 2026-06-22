@@ -69,6 +69,21 @@ def test_terror_composite():
     assert not tc2.update(10.0, False, False, True)  # outside the window
 
 
+def test_fight_index():
+    from flowsight.anomaly import _fight_index
+    assert _fight_index({0: "Fight", 1: "NonFight"}) == 0
+    assert _fight_index({0: "NonFight", 1: "Fight"}) == 1
+    assert _fight_index(["NonFight", "Fight"]) == 1
+
+
+def test_narrate():
+    from flowsight.anomaly import narrate
+    assert narrate(1.0, {}) == ""
+    s = narrate(5.0, {"terror": True, "violence": True, "fight_prob": 0.9,
+                      "divergence": True, "div_center": (3, 4), "n_fast": 2})
+    assert "테러" in s and "폭력" in s and "5.0" in s
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
