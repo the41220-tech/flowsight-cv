@@ -1,6 +1,6 @@
 # FlowSight AI — Project Handoff & Continuation Log
 
-**Last updated:** 2026-06-21
+**Last updated:** 2026-06-22 (MOAT layer 2: absolute 0.02/s² alarm + non-planar 3-D metric depth)
 **Owner:** 감경민 (POSCO 청년 AI·Big Data 아카데미 project)
 **Canonical repo:** https://github.com/the41220-tech/flowsight-cv
 **Working folder:** `~/Desktop/magi/flowsight-cv` (this repo)
@@ -64,7 +64,7 @@ ground truth with the **real FT-2 detector recall** plugged in. Real-crowd-video
 channel ran on real footage and the flow-pressure alarm **led panic onset in all 7 episodes**
 (see §7). External validity (WILDTRACK / DroneCrowd / real crush footage) belongs to Stage 7.
 
-**Post-Stage-6 (2026-06-22):** built the per-person **tracker** (ByteTrack on FT-2), the user-spec **dashboard v2** (video + danger-coloured moving dots; panic demo delivered), and **moat layer 1 = crowd-pressure heatmap** (Helbing P=ρ·Var(v), validated 137× erratic-vs-coherent). Next = **moat layer 2**: calibration → absolute 0.02/s² alarm + non-planar 3D terrain. See §10.
+**Post-Stage-6 (2026-06-22):** built the per-person **tracker** (ByteTrack on FT-2), the user-spec **dashboard v2** (video + danger-coloured moving dots; panic demo delivered), **moat layer 1 = crowd-pressure heatmap** (Helbing P=ρ·Var(v), validated 137× erratic-vs-coherent), and **moat layer 2 = metric calibration → absolute 0.02/s² alarm + non-planar 3-D metric depth** (built, unit-tested 7/7, synth-E2E + Colab-Pro-L4 real-footage validated). See §10.
 
 ---
 
@@ -298,9 +298,11 @@ finetune/
 - ✅ **Dashboard v2** (`experiments/dashboard2_build.py`) — rebuilt to user spec: LEFT real video | RIGHT moving dots coloured by danger (green/amber/red by speed) + trails, plain KO labels, H.264. **Panic demo** delivered (auto-detected UMN peak-motion panic via frame-diff; 위험도 높음, 6 red dots).
 - ✅ **MOAT layer 1 — crowd pressure** (`flowsight/physics/crowd_pressure.py` + `experiments/pressure_run.py`) — Helbing P=ρ·Var(v) field from tracks (vectorised Gaussian deposition); pressure HEATMAP demo (압착 위험 지도). Validated: erratic crowd **137×** pressure of equally-dense coherent crowd. Hotspot lands on the dense cluster; level 높음.
 
+- ✅ **MOAT layer 2 — metric calibration → absolute 0.02/s² alarm + non-planar 3-D** (2026-06-22, committed + pushed; Colab-Pro-L4 validated). The metric Helbing path already existed (`physics/pressure.py`+`density.py`); the new pieces are the px→m **bridge** (`geometry/calibration.py`: homography+Jacobian / pedestrian-1.7m), the **absolute alarm** (`crowd_pressure.frame_pressure_metric`→1/s², `alarm_level` at P_CRIT=0.02), and **non-planar 3-D** (`pipeline/moat_field.py`: metric-depth→foot-3D→DEM→U=ρgh+∇U, `MoatMonitor`). Tests 7/7 (ρ4·Var0.18→P0.72/s² exact; backproject 0 m). Synth E2E: absolute alarm leads crush onset **+10.47 s** (3 seeds); peak P 9–87× threshold, density 7.3–10.1/m². **Real (Colab Pro L4):** FT-2 ByteTrack on UMN (433 IDs) → `absolute_alarm_run.py` → real-footage P in 1/s² (event spikes to ~20/s², 0.02 line); **Depth-Anything-V2-Metric-Outdoor-Large-hf** → real metric depth 4.9–59.4 m (median 12.3 m), people resolved at depth. Demo `experiments/absolute_alarm_run.py`; doc `docs/moat2_absolute_alarm_2026-06-22.md`; H8/Iter-6. Outputs on Drive `flowsight_demo/{absolute_cctv.mp4,_frame.png,_timeline.png,depth_ref.png}`.
+
 **Next (priority order):**
-1. **MOAT layer 2 — calibration → absolute alarm (TOP):** metric homography (4 surveyed pts / H1 depth) → px→m → apply Helbing **critical threshold ≈0.02/s²** so the *relative* pressure map becomes a real **early-warning alarm** (Helbing 2007: pressure crossed 0.02/s² ~10 min before the Jamarat crush). Then **non-planar 3D**: foot-points → ground mesh + gravitational potential U=ρgh. This is the moat.
-2. **Precision refinement:** lift the over-sensitive flow alarm (P=0.12–0.28) via duration-gate/hysteresis; cheap via cached `rvt_arrays.npz`.
+1. **Wire metric-depth calibration into the alarm (TOP):** the demo used pedestrian-scale (`--person-px`) which INFLATES absolute magnitude on mixed/indoor scenes (peak ~1000× threshold). Add a `DepthCalibrator` (metric depth → per-track ground X,Y) so `absolute_alarm_run` uses TRUE metres (no surveyed points) — turns the 0.02/s² alarm physically accurate. Note: VKITTI metric ckpt fails in `transformers.pipeline` (no `model_type`); use the `-hf` metric checkpoints.
+2. **Precision refinement:** lift the over-sensitive alarm (real run: 680/774 frames p_max≥0.02; P=0.12–0.28 on UMN) via duration-gate/hysteresis; cheap via cached `rvt_arrays.npz`.
 3. **Drone tracking + dashboard:** FT-2 (Drive) on aerial (baseline=0 on aerial) — proves input-source-agnostic. Needs GPU.
 4. **Broaden anomaly types (mission §1):** surge, counterflow, dispersal, falls, blocked exits — one flow/track engine, a detector+metric per event (datasets in user's `FlowSight_AnomalyPattern_Resources_2026-06-21.md`).
 5. **Stage 7:** multi-camera fusion, object ID (VLM), external validation on real crush footage, edge deploy.
