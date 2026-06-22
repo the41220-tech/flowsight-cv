@@ -87,27 +87,33 @@ def scene_grade(tracks: list, p90: float) -> tuple:
 
 
 def draw_strip(canvas_bgr, W, strip_h, n, grade, gc, nfast, t):
-    """Draw the top label/KPI strip + legend with PIL (Korean-capable)."""
+    """Draw the top label/KPI strip + legend with PIL (Korean-capable).
+
+    Layout: LEFT half (video) = title + 사람/위험도 KPI; RIGHT half (dots) =
+    title + colour legend + 빠른 이동 count. Kept within each half so labels
+    never overlap. Clock burned bottom-left of the video panel.
+    """
+    Himg = canvas_bgr.shape[0] - strip_h
     im = Image.fromarray(cv2.cvtColor(canvas_bgr, cv2.COLOR_BGR2RGB))
     d = ImageDraw.Draw(im)
-    f_title = load_font(17)
+    f_title = load_font(16)
     f_kpi = load_font(20)
-    f_small = load_font(14)
-    # panel titles
-    d.text((12, 8), "● 실시간 영상", fill=WHITE_RGB, font=f_title)
-    d.text((W + 12, 8), "● 이동 분석  (점 = 사람, 색 = 위험)", fill=WHITE_RGB, font=f_title)
-    # KPI line (left side of strip, under the left-panel title)
-    d.text((12, 36), f"사람 {n}명", fill=WHITE_RGB, font=f_kpi)
-    d.text((150, 36), "위험도", fill=GREY_RGB, font=f_kpi)
-    d.text((230, 36), grade, fill=gc, font=f_kpi)
-    d.text((300, 36), f"· 빠르게 이동 {nfast}명", fill=GREY_RGB, font=f_kpi)
-    d.text((W * 2 - 92, 36), f"t = {t:0.1f}s", fill=GREY_RGB, font=f_small)
-    # legend (right-panel side, under its title)
+    f_small = load_font(13)
+    # LEFT half (video): title + KPI
+    d.text((12, 7), "● 실시간 영상", fill=WHITE_RGB, font=f_title)
+    d.text((12, 35), f"사람 {n}명", fill=WHITE_RGB, font=f_kpi)
+    d.text((120, 41), "위험도", fill=GREY_RGB, font=f_small)
+    d.text((172, 35), grade, fill=gc, font=f_kpi)
+    # RIGHT half (dots): title + legend + fast count
+    d.text((W + 12, 7), "● 이동 분석 · 점 = 사람", fill=WHITE_RGB, font=f_title)
     lx = W + 12
     for label, rgb in (("정상", GREEN_RGB), ("주의", AMBER_RGB), ("위험", RED_RGB)):
-        d.ellipse((lx, 41, lx + 12, 53), fill=rgb)
-        d.text((lx + 16, 38), label, fill=GREY_RGB, font=f_small)
-        lx += 70
+        d.ellipse((lx, 40, lx + 11, 51), fill=rgb)
+        d.text((lx + 15, 37), label, fill=GREY_RGB, font=f_small)
+        lx += 62
+    d.text((lx + 6, 37), f"빠른 이동 {nfast}명", fill=(235, 170, 90), font=f_small)
+    # clock on the video panel (bottom-left)
+    d.text((10, strip_h + Himg - 22), f"t = {t:0.1f}s", fill=(220, 220, 220), font=f_small)
     return cv2.cvtColor(np.array(im), cv2.COLOR_RGB2BGR)
 
 
@@ -174,8 +180,9 @@ def main(video, tracks_json, out, source_type, trail=8):
         canvas = draw_strip(canvas, W, strip_h, len(rec["tracks"]), grade, gc, nfast, rec["t"])
         vw.write(canvas)
 
-        if len(rec["tracks"]) > best[0]:
-            best = (len(rec["tracks"]), canvas.copy())
+        score = nfast * 10 + len(rec["tracks"])  # busy + some danger = best demo still
+        if score > best[0]:
+            best = (score, canvas.copy())
         if si % 50 == 0:
             print("[dash2]   %d t=%.1fs n=%d grade=%s fast=%d"
                   % (si, rec["t"], len(rec["tracks"]), grade, nfast), flush=True)
