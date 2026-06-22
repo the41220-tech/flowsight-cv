@@ -222,6 +222,10 @@ class DepthGroundCalibrator:
         Pc = np.column_stack([(u - self.cx) * z / self.fx,
                               (v - self.cy) * z / self.fy, z])
         self.n, self.d, _ = _fit_plane_ransac(Pc, thresh=ransac_thresh_m)
+        # cap ground distance to the observed scene depth: near-horizon foot
+        # pixels make the ray nearly parallel to the plane -> t -> infinity, which
+        # would blow up the metric grid. Clamp to ~1.5x the 99th-pct scene depth.
+        self.max_depth = float(np.percentile(Pc[:, 2], 99)) * 1.5
         # in-plane orthonormal basis + origin (plane point nearest the camera)
         a = np.array([1.0, 0.0, 0.0])
         if abs(self.n @ a) > 0.9:
@@ -240,8 +244,8 @@ class DepthGroundCalibrator:
     def _ground_3d(self, uv: np.ndarray) -> np.ndarray:
         d_cam = self._ray_dirs(uv)
         denom = d_cam @ self.n
-        denom = np.where(np.abs(denom) < 1e-9, 1e-9, denom)
-        t = self.d / denom
+        denom = np.clip(denom, 1e-3, None)  # forward hits only; tiny -> capped t
+        t = np.clip(self.d / denom, 0.0, self.max_depth)  # cap near-horizon blow-up
         return d_cam * t[:, None]  # camera-space 3-D on the ground plane
 
     def to_ground(self, uv: np.ndarray) -> np.ndarray:
@@ -275,12 +279,17 @@ def tracks_to_metric(
     return cal.to_ground(uv), cal.velocity_to_metric(uv, v_px)
 
 
-def metric_bounds(xy_m_frames: Iterable[np.ndarray], pad_m: float = 2.0) -> tuple:
-    """(x0,y0,x1,y1) bounds covering all metric points across frames, padded."""
+def metric_bounds(xy_m_frames: Iterable[np.ndarray], pad_m: float = 2.0,
+                  pct: float = 99.0, max_span_m: float = 300.0) -> tuple:
+    """(x0,y0,x1,y1) bounds across frames, padded. ROBUST: uses the [100-pct, pct]
+    percentile per axis (not min/max) so a few far/outlier points can't blow up
+    the metric grid, and the span is hard-capped at max_span_m."""
     pts = [p for p in xy_m_frames if len(p)]
     if not pts:
         return (0.0, 0.0, 1.0, 1.0)
     allp = np.vstack(pts)
-    x0, y0 = allp.min(0) - pad_m
-    x1, y1 = allp.max(0) + pad_m
-    return (float(x0), float(y0), float(x1), float(y1))
+    lo = np.percentile(allp, 100.0 - pct, axis=0) - pad_m
+    hi = np.percentile(allp, pct, axis=0) + pad_m
+    span = np.minimum(hi - lo, max_span_m)
+    hi = lo + span
+    return (float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1]))

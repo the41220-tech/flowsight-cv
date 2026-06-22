@@ -216,6 +216,33 @@ def test_depth_ground_calibrator_metric_recovery():
     assert np.isfinite(vm).all() and np.linalg.norm(vm) > 0
 
 
+def test_depth_calibrator_horizon_clamp():
+    """Near-horizon foot pixels must NOT explode bounds (caused a Colab OOM)."""
+    from flowsight.geometry.calibration import (
+        DepthGroundCalibrator,
+        intrinsics_from_fov,
+        metric_bounds,
+    )
+
+    W, H, fov = 640, 480, 65.0
+    fx, fy, cx, cy = intrinsics_from_fov(W, H, fov)
+    n = np.array([0.0, -0.6, 0.8])
+    n /= np.linalg.norm(n)
+    d = 8.0
+    ys, xs = np.mgrid[0:H, 0:W]
+    dcam = np.stack([(xs - cx) / fx, (ys - cy) / fy, np.ones_like(xs, float)], -1)
+    den = dcam @ n
+    t = np.where(np.abs(den) > 1e-6, d / den, -1.0)
+    Z = np.where(t > 0, t, 0.0)
+    cal = DepthGroundCalibrator(Z, fov_deg=fov, subsample=8)
+    # 250 is near the horizon (ray nearly parallel to ground)
+    foot = np.array([[320, 250], [200, 400], [440, 400]], float)
+    g = cal.to_ground(foot)
+    assert np.isfinite(g).all()
+    b = metric_bounds([g])
+    assert max(b[2] - b[0], b[3] - b[1]) < 300.0  # no runaway grid
+
+
 # --------------------------------------------------------------------------- #
 # plain-python fallback runner (no pytest needed)
 # --------------------------------------------------------------------------- #
