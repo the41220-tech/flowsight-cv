@@ -64,6 +64,8 @@ ground truth with the **real FT-2 detector recall** plugged in. Real-crowd-video
 channel ran on real footage and the flow-pressure alarm **led panic onset in all 7 episodes**
 (see §7). External validity (WILDTRACK / DroneCrowd / real crush footage) belongs to Stage 7.
 
+**Post-Stage-6 (2026-06-22):** built the per-person **tracker** (ByteTrack on FT-2), the user-spec **dashboard v2** (video + danger-coloured moving dots; panic demo delivered), and **moat layer 1 = crowd-pressure heatmap** (Helbing P=ρ·Var(v), validated 137× erratic-vs-coherent). Next = **moat layer 2**: calibration → absolute 0.02/s² alarm + non-planar 3D terrain. See §10.
+
 ---
 
 ## 3. Hypothesis ledger (see `experiments/hypotheses.md`)
@@ -265,7 +267,7 @@ drive.mount('/content/drive')
 ```
 flowsight/
   geometry/{camera,terrain,homography,metric_depth}.py   # pinhole cam, non-planar terrain, IPM, depth back-proj
-  physics/{density,potential,pressure}.py                # density field, ∇U potential, Helbing pressure + risk
+  physics/{density,potential,pressure,crowd_pressure,flow_features}.py  # density, ∇U potential, Helbing pressure; crowd_pressure=P=ρ·Var(v) field from TRACKS (moat); flow_features=dense-flow divergence/curl/counterflow
   sim/social_force_terrain.py                            # sloped-terrain Social-Force crowd sim (synthetic GT)
   perception/{detect,obstacles}.py                       # RT-DETRv2 person detector, open-vocab + VLM identify
   eval/recall.py                                         # IoU match, NMS, RecallMeter (per-domain/size)
@@ -274,7 +276,11 @@ experiments/
   hypotheses.md                                          # H1–H7 + iteration log
   bench_recall.py                                        # multi-model recall benchmark (loaders + detectors)
   run_h6_disaster.py / run_h7_sahi_disaster.py           # disaster verifications (CPU)
-  real_video_threat.py                                   # Stage-6 real-video pipeline (NEEDS speed fix, §7)
+  real_video_threat.py                                   # Stage-6 real-video pipeline (speed-fixed; alarm leads onset 7/7)
+  rvt_precision.py                                        # precision sweep (threshold × duration-gate), caches rvt_arrays.npz
+  track_run.py                                           # ByteTrack on FT-2 → per-person tracks_<type>.json + overlay mp4
+  dashboard2_build.py                                    # dashboard v2: LEFT video | RIGHT speed-coloured moving dots, KO labels
+  pressure_run.py                                        # MOAT: LEFT video | RIGHT Helbing crowd-pressure heatmap (압착 위험 지도)
   results/ , figures/                                    # logged numbers + plots
 finetune/
   prepare_data.py / prepare_mix.py                       # VisDrone-person ; + COCO val2017 -> person_mix
@@ -287,14 +293,19 @@ finetune/
 
 ## 10. Pending / next steps
 
-1. **Commit `real_video_threat.py` to GitHub** (currently local-only → push so Colab clones include it).
-2. **Precision refinement + H7b re-run:** add episode-merge/hysteresis to lift alarm precision (now P=0.12–0.28; cheap via cached `rvt_arrays.npz`) + frame-level GT; re-run the H7b sim at the *measured* SAHI recall 0.71 (not the lit. 0.86) to check whether the density-counting alarm fires. (H7a itself ✅ done — `eval_sahi.py`.)
-3. **Dashboard:** turn the 3D human-point map + risk timeline into the live dashboard view (real-video assets now exist on Drive).
-4. **Broaden anomaly types (mission §1):** beyond panic/crush — surge, counterflow, sudden dispersal, falls, blocked exits; define a detector + metric per anomaly so the one flow engine serves many events.
-5. **FT-3 (optional):** higher COCO ratio to push CCTV recall back toward 0.685.
-6. **Stage 7:** multi-camera fusion (WILDTRACK/MultiviewX GT), object ID via open-vocab/VLM,
-   external validation on real datasets, metric homography calibration (4 surveyed points / H1 depth),
-   edge optimization.
+**Done since last handoff (2026-06-22, all committed + pushed to GitHub):**
+- ✅ **Multi-object tracker** (`experiments/track_run.py`) — ByteTrack on FT-2/yolo11m → per-person track IDs + (x,y,vx,vy) trajectories + dwell (UMN: 117 unique IDs, ~13/frame). The shared data layer for dashboard + dwell/OD + pressure.
+- ✅ **Dashboard v2** (`experiments/dashboard2_build.py`) — rebuilt to user spec: LEFT real video | RIGHT moving dots coloured by danger (green/amber/red by speed) + trails, plain KO labels, H.264. **Panic demo** delivered (auto-detected UMN peak-motion panic via frame-diff; 위험도 높음, 6 red dots).
+- ✅ **MOAT layer 1 — crowd pressure** (`flowsight/physics/crowd_pressure.py` + `experiments/pressure_run.py`) — Helbing P=ρ·Var(v) field from tracks (vectorised Gaussian deposition); pressure HEATMAP demo (압착 위험 지도). Validated: erratic crowd **137×** pressure of equally-dense coherent crowd. Hotspot lands on the dense cluster; level 높음.
+
+**Next (priority order):**
+1. **MOAT layer 2 — calibration → absolute alarm (TOP):** metric homography (4 surveyed pts / H1 depth) → px→m → apply Helbing **critical threshold ≈0.02/s²** so the *relative* pressure map becomes a real **early-warning alarm** (Helbing 2007: pressure crossed 0.02/s² ~10 min before the Jamarat crush). Then **non-planar 3D**: foot-points → ground mesh + gravitational potential U=ρgh. This is the moat.
+2. **Precision refinement:** lift the over-sensitive flow alarm (P=0.12–0.28) via duration-gate/hysteresis; cheap via cached `rvt_arrays.npz`.
+3. **Drone tracking + dashboard:** FT-2 (Drive) on aerial (baseline=0 on aerial) — proves input-source-agnostic. Needs GPU.
+4. **Broaden anomaly types (mission §1):** surge, counterflow, dispersal, falls, blocked exits — one flow/track engine, a detector+metric per event (datasets in user's `FlowSight_AnomalyPattern_Resources_2026-06-21.md`).
+5. **Stage 7:** multi-camera fusion, object ID (VLM), external validation on real crush footage, edge deploy.
+
+**Colab cost note (2026-06-22):** free **GPU quota can exhaust** → CPU works (tracking slow ~5min @ imgsz640 step3; pressure fast ~10s). Session cap may force ending other notebooks. After VM recycle re-pipeline: clone → UMN download → `find_panic`(b64) trim → `track_run` → `dashboard2_build` / `pressure_run` (pressure reuses tracks, no re-track).
 
 ## 11. Honest caveats to carry forward
 - Physics/disaster results are **synthetic-GT mechanism proofs** + real detector recall — not yet
