@@ -75,7 +75,7 @@ channel ran on real footage and the flow-pressure alarm **led panic onset in all
 | H3 | Drone fine-tuning lifts drone/small recall | ✅ FT-1 drone 0.154→0.512 (3.3×) |
 | H3′ | Mixed VisDrone+COCO training fixes CCTV forgetting while keeping drone | ✅ FT-2 (see §5) |
 | H6 | Detection + terrain-3D + flow/potential predicts crush earlier & more robustly than density-only | ✅ multimodal lead 5.2–6.0 s vs density-only 4.2–4.4 s; holds at 30–51% recall |
-| H7 | SAHI tiling recovers small/distant recall (no retrain); recall controls the density alarm; multimodal gives the early warning | ✅ H7b (CPU) verified; **H7a (real SAHI recall) still pending** |
+| H7 | SAHI tiling recovers small/distant recall (no retrain); recall controls the density alarm; multimodal gives the early warning | ✅ H7b (CPU) verified; **H7a measured (2026-06-22): SAHI drone 0.571→0.712, small 0.517→0.673, but BELOW the 0.86 lit. assumption** |
 
 **Itaewon empirical anchor (used for thresholds):** avg density 7.57 ppl/m² (max 9.95),
 avg crowd pressure 1,063 N/m. Operational crush density `RHO_CRIT = 6.0`.
@@ -178,9 +178,33 @@ Mean lead ≈ 3.9 s. Peak panic t=240.5 s, 19 people in the 3D map. Outputs on D
 **Honest read:** on this real footage the flow-pressure channel is reliably *at or ahead of* the
 visible panic onset — strong support that the movement/flow channel detects the anomaly early. The
 +4.3 s lead is bounded by the 8-frame (=4.27 s) alarm look-back window, so the true lead may be larger.
-**Caveat (don't overclaim):** at threshold 0.25 the pressure curve spikes often (see risk_timeline.png),
-so the alarm is *sensitive* — precision / false-positive rate is NOT characterized here. Next: sweep the
-threshold, add a sustained-duration gate, and report precision/recall of episode detection, not just lead.
+**Precision — NOW MEASURED (2026-06-22, `experiments/rvt_precision.py`):** swept the alarm over
+threshold {0.15…0.40} × duration-gate K {1,2,3} vs the speed-onset proxy GT (per-frame arrays cached to
+`rvt_arrays.npz` so re-sweeps are instant). Result: at **every** setting **recall = 1.00** (all 7 panic
+episodes caught) but **precision = 0.12–0.28** — the alarm fires 12–27 episodes vs 7 real. Best point
+thr=0.40/K=3 → P=0.28 (n_alarm=18). So the alarm is **high-recall / low-precision = over-sensitive**, and
+the duration gate helps only marginally. Honest caveats: precision is deflated by (a) episode
+fragmentation (pressure re-crosses threshold within one event) and (b) a strict proxy GT. **Next (cheap,
+uses cached arrays):** episode-merge/hysteresis + frame-level GT labels. Outputs:
+`precision_sweep.json`, `precision_pr.png`.
+
+### H7a — real SAHI recall on FT-2 (✅ measured 2026-06-22, `finetune/eval_sahi.py`, slice 512 / overlap 0.2)
+
+Same 100-img holdout (50 VisDrone + 50 COCO128), thr 0.25, IoU 0.5:
+
+| metric | FT-2 plain | FT-2 + SAHI | Δ |
+|---|---|---|---|
+| overall recall | 0.552 | **0.698** | +0.146 |
+| drone recall | 0.571 | **0.712** | +24.7% |
+| cctv recall | 0.455 | **0.629** | +38% |
+| small recall | 0.517 | **0.673** | +30% |
+| precision | 0.612 | 0.547 | −0.065 |
+
+**Verdict: H7a supported** — SAHI sliced inference lifts recall across the board (drone +25%, small +30%,
+even cctv) with NO retraining; precision dips modestly. **BUT the measured SAHI drone recall (0.712) is
+well below the 0.86 literature figure H7b assumed** — so re-state H7b with 0.71, and re-run the H7b sim at
+recall 0.71 to check whether the density-counting alarm now fires (the multimodal-moat conclusion — early
+warning comes from the flow/terrain channel, not the count — holds regardless).
 
 > ⚠️ **Repo note:** `real_video_threat.py` is NOT yet committed to the GitHub repo (it was deployed
 > to Colab ad-hoc in past sessions). It lives in the local working folder — **commit + push it** so
@@ -264,7 +288,7 @@ finetune/
 ## 10. Pending / next steps
 
 1. **Commit `real_video_threat.py` to GitHub** (currently local-only → push so Colab clones include it).
-2. **H7a:** measure real SAHI recall gain on FT-2 (`eval_sahi.py`) → validate the 0.86 assumption.
+2. **Precision refinement + H7b re-run:** add episode-merge/hysteresis to lift alarm precision (now P=0.12–0.28; cheap via cached `rvt_arrays.npz`) + frame-level GT; re-run the H7b sim at the *measured* SAHI recall 0.71 (not the lit. 0.86) to check whether the density-counting alarm fires. (H7a itself ✅ done — `eval_sahi.py`.)
 3. **Dashboard:** turn the 3D human-point map + risk timeline into the live dashboard view (real-video assets now exist on Drive).
 4. **Broaden anomaly types (mission §1):** beyond panic/crush — surge, counterflow, sudden dispersal, falls, blocked exits; define a detector + metric per anomaly so the one flow engine serves many events.
 5. **FT-3 (optional):** higher COCO ratio to push CCTV recall back toward 0.685.
