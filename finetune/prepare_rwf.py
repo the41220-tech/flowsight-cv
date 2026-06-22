@@ -42,17 +42,24 @@ def _find_video_bytes(ex: dict):
 
 
 def _find_label(ex: dict):
-    """Return 'Fight' / 'NonFight' / None from any label-ish field or __key__."""
-    blobs = []
+    """Return 'Fight' / 'NonFight' / None.
+
+    Uses ONLY the __key__ path (e.g. 'RWF-2000/train/NonFight/xxx') and explicit
+    non-bytes label fields — NEVER the video bytes (str(bytes) can randomly contain
+    'fight'/'nonfight' and mislabel). Check 'nonfight' BEFORE 'fight' since the
+    former contains the latter as a substring.
+    """
     for k, v in ex.items():
-        if isinstance(v, (str, bytes)):
-            blobs.append(str(v).lower())
-        elif isinstance(v, int):
-            blobs.append("int:%d:%s" % (v, k.lower()))
-    s = " ".join(blobs)
-    if "nonfight" in s or "non_fight" in s or "normal" in s or "int:0" in s:
+        if k.lower() in ("cls", "label", "class") and not isinstance(v, (bytes, bytearray)):
+            sv = str(v).lower()
+            if "nonfight" in sv or "non_fight" in sv or "normal" in sv:
+                return "NonFight"
+            if "fight" in sv or "violen" in sv:
+                return "Fight"
+    key = str(ex.get("__key__", "")).lower()
+    if "nonfight" in key or "non_fight" in key or "/normal" in key:
         return "NonFight"
-    if "fight" in s or "violen" in s or "int:1" in s:
+    if "fight" in key:
         return "Fight"
     return None
 
