@@ -287,6 +287,38 @@ def test_bev_recall_calibrated_beats_foot():
         assert cal["recall"] > foot["recall"]                 # calibrated anchor wins end-to-end
 
 
+def test_head_anchor_beats_global_alpha_under_heterogeneous_occlusion():
+    """H1 (Cycle10): under REALISTIC heterogeneous foot occlusion (each person's bbox
+    truncated at a DIFFERENT body level — dense crowds), a single global bbox-fraction
+    alpha* cannot adapt per-person, but the height-prior HEAD anchor ignores the bbox
+    bottom and recovers the ground with ZERO fitting (Zhang & Ye 2024 head>ankle).
+    Falsifiable: fails if a fitted global alpha matches the head anchor here.
+    NUANCE: when occlusion is UNIFORM a fitted alpha transfers fine even across
+    cameras (verified separately) -- the head anchor's edge is per-person occlusion
+    robustness, not cross-camera transfer."""
+    import tempfile
+    from experiments.wildtrack_selftest import build_scene
+    from flowsight.eval.anchor_proj import calibrate_alpha, median_err, head_loc_errors
+    rng = np.random.default_rng(5)
+    with tempfile.TemporaryDirectory() as d:
+        cams, raw = build_scene(d)
+        cam = cams["CVLab1"]; K, rvec, tvec = raw["CVLab1"]
+        W = np.array([[x, y] for x in np.linspace(-1, 7, 5) for y in np.linspace(3, 24, 6)])
+        heights = rng.uniform(1.63, 1.77, len(W))
+        occ = rng.uniform(0.0, 0.9, len(W))            # per-person bbox-bottom body level (m)
+        bs = []
+        for (x, y), h, oc in zip(W, heights, occ):
+            head = _proj3d(K, rvec, tvec, [[x, y, h]])[0]
+            bot = _proj3d(K, rvec, tvec, [[x, y, oc]])[0]    # heterogeneous truncation
+            bs.append([head[0] - 8, head[1], head[0] + 8, bot[1]])
+        boxes = np.array(bs)
+        k = len(boxes) // 2
+        a_star, _ = calibrate_alpha(cam, boxes[:k], W[:k], grid=np.linspace(0.5, 2.5, 81))
+        alpha_err = median_err(cam, boxes[k:], W[k:], a_star)             # global fitted constant
+        head_err = float(np.median(head_loc_errors(cam, boxes[k:], W[k:], 1.7)))  # zero fit
+        assert head_err < alpha_err and head_err < 0.5     # head anchor wins, no fitting
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

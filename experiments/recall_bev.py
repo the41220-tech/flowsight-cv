@@ -18,27 +18,38 @@ import os
 
 import numpy as np
 
-from flowsight.eval.anchor_proj import calibrate_alpha, loc_errors, project_anchor
+from flowsight.eval.anchor_proj import calibrate_alpha, loc_errors, project_anchor, project_head
 from flowsight.geometry.wildtrack import match_to_gt
 from experiments.anchor_lab import NAMES, _cam, load_pairs
 
 
-def bev_recall(cam, det_list, gtw_list, alpha, radius=1.0):
-    """det_list[i] = (Ni,5|4) detector boxes; gtw_list[i] = (Mi,2) GT world. Project
-    each box's alpha-anchor -> ground -> match to GT world within `radius`."""
+def _bev(cam, det_list, gtw_list, project, radius):
+    """Shared BEV recall scorer; `project(cam, boxes)->(K,2) world` selects the anchor."""
     tp = fn = fp = 0
     errs = []
     for det, g in zip(det_list, gtw_list):
         if not len(g):
             continue
         det = np.atleast_2d(np.asarray(det, float))
-        w = project_anchor(cam, det[:, :4], alpha) if len(det) else np.zeros((0, 2))
+        w = project(cam, det[:, :4]) if len(det) else np.zeros((0, 2))
         m = match_to_gt(w, g, radius)
         tp += m["tp"]; fn += m["fn"]; fp += m["fp"]
         if m["mean_loc_err_m"] is not None:
             errs.append(m["mean_loc_err_m"])
     return {"recall": tp / (tp + fn + 1e-9), "loc_err": float(np.mean(errs)) if errs else float("nan"),
             "tp": tp, "fn": fn, "fp": fp}
+
+
+def bev_recall(cam, det_list, gtw_list, alpha, radius=1.0):
+    """det_list[i] = (Ni,5|4) detector boxes; gtw_list[i] = (Mi,2) GT world. Project
+    each box's alpha-anchor (vertical fraction) -> ground -> match GT within `radius`."""
+    return _bev(cam, det_list, gtw_list, lambda c, b: project_anchor(c, b, alpha), radius)
+
+
+def bev_recall_head(cam, det_list, gtw_list, height_m=1.7, radius=1.0):
+    """Cycle10: BEV recall with the height-prior HEAD anchor (NO per-camera fit,
+    robust to heterogeneous foot occlusion) instead of a bbox vertical fraction."""
+    return _bev(cam, det_list, gtw_list, lambda c, b: project_head(c, b, height_m), radius)
 
 
 def auto_calib(root, frames):
@@ -86,9 +97,12 @@ def main(a):
     for r in (1.0, 2.0):
         foot = bev_recall(cam, dets, gtw_test, 1.0, r)
         cal = bev_recall(cam, dets, gtw_test, a_star, r)
-        print("  @%.0fm  foot recall %.3f (locerr %.2f)  |  calib(a=%.2f) recall %.3f (locerr %.2f)  Δ%+.3f"
+        head = bev_recall_head(cam, dets, gtw_test, a.height, r)
+        print("  @%.0fm  foot %.3f (le%.2f) | calib(a=%.2f) %.3f (le%.2f) | HEAD(%.2fm) %.3f (le%.2f)"
+              "  Δhead-foot %+.3f  Δhead-calib %+.3f"
               % (r, foot["recall"], foot["loc_err"], a_star, cal["recall"], cal["loc_err"],
-                 cal["recall"] - foot["recall"]), flush=True)
+                 a.height, head["recall"], head["loc_err"],
+                 head["recall"] - foot["recall"], head["recall"] - cal["recall"]), flush=True)
 
 
 if __name__ == "__main__":
@@ -99,4 +113,5 @@ if __name__ == "__main__":
     ap.add_argument("--weights", default="yolo11x.pt")
     ap.add_argument("--conf", type=float, default=0.2)
     ap.add_argument("--imgsz", type=int, default=1280)
+    ap.add_argument("--height", type=float, default=1.7, help="height prior (m) for the head anchor")
     main(ap.parse_args())

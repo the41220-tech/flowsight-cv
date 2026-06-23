@@ -73,6 +73,40 @@ def occlude_boxes(boxes, frac=0.2):
     return b
 
 
+def head_anchor(boxes):
+    """(N,4) xyxy -> (N,2) head pixel = top-centre of the bbox."""
+    b = np.atleast_2d(np.asarray(boxes, float))
+    if not len(b):
+        return np.zeros((0, 2))
+    cx = (b[:, 0] + b[:, 2]) / 2.0
+    return np.column_stack([cx, b[:, 1]])
+
+
+def project_head(cam, boxes, height_m=1.7):
+    """Head pixel -> intersect ray with the Z=height_m plane -> world (X,Y) (m).
+
+    Height-prior vertical-segment anchor: a standing person's head sits ~height_m
+    above their ground contact and shares its (X,Y), so the head ray meeting the
+    Z=height_m plane recovers the ground position. Unlike the bbox fraction alpha it
+    needs NO per-camera fit and is robust to FOOT OCCLUSION (head stays visible).
+    cam must expose ``to_plane`` (flowsight.geometry.wildtrack.WildtrackCamera).
+    (Zhang & Ye 2024: head localisation beats ankle; Niu 2021 vertical segment.)"""
+    h = head_anchor(boxes)
+    if not len(h):
+        return np.zeros((0, 2))
+    return cam.to_plane(h, height_m)
+
+
+def head_loc_errors(cam, boxes, gt_world, height_m=1.7):
+    """Per-box ground error (m) of the head-anchor projection vs gt_world[i]."""
+    w = project_head(cam, boxes, height_m)
+    g = np.atleast_2d(np.asarray(gt_world, float))
+    n = min(len(w), len(g))
+    if n == 0:
+        return np.zeros(0)
+    return np.linalg.norm(w[:n] - g[:n], axis=1)
+
+
 def head_extrapolated_anchor(boxes_full_h, trunc_boxes):
     """Given a truncated box + a known full-body pixel height, estimate the foot
     pixel from the (visible) head/top: foot_y = top + full_height. Returns (N,2)."""

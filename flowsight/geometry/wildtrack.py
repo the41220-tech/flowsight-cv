@@ -41,6 +41,32 @@ class WildtrackCamera:
         self.C = -self.R.T @ self.t          # camera centre in world coords
         self.s = float(unit_scale)            # world units -> metres (cm -> 0.01)
 
+    def to_plane(self, uv: np.ndarray, height_m: float = 0.0, bounds=None) -> np.ndarray:
+        """Back-project pixels (N,2) onto the world plane Z=height_m -> (X,Y) METRES.
+
+        height_m=0 is the ground plane (``to_ground``). Projecting a HEAD pixel onto
+        Z~=1.7 m recovers the SAME (X,Y) as the person's ground contact while staying
+        well-posed when the FEET ARE OCCLUDED (the head is near-always visible). This
+        is the height-prior vertical-segment anchor (Niu 2021; head>ankle, Zhang & Ye
+        2024) and, unlike the data-fitted bbox fraction alpha, needs NO per-camera fit.
+        `bounds` applies the same near-horizon clamp as ``to_ground``."""
+        uv = np.atleast_2d(np.asarray(uv, float))
+        if not len(uv):
+            return np.zeros((0, 2))
+        Zc = float(height_m) / self.s          # plane height in world units (cm)
+        pix = np.hstack([uv, np.ones((len(uv), 1))])
+        d_cam = (self.Kinv @ pix.T).T          # ray dir in camera frame
+        d_world = (self.R.T @ d_cam.T).T       # rotate to world
+        with np.errstate(divide="ignore", invalid="ignore"):
+            lam = (Zc - self.C[2]) / d_world[:, 2]   # intersect Z=Zc
+        XY = (self.C[None, :] + lam[:, None] * d_world)[:, :2] * self.s
+        if bounds is None:
+            return XY
+        x0, y0, x1, y1 = bounds
+        ok = ((d_world[:, 2] < -1e-9) & (lam > 0) & np.isfinite(XY).all(axis=1)
+              & (XY[:, 0] > x0) & (XY[:, 0] < x1) & (XY[:, 1] > y0) & (XY[:, 1] < y1))
+        return XY[ok]
+
     def to_ground(self, uv: np.ndarray, bounds=None) -> np.ndarray:
         """Foot pixels (N,2) -> world ground (Z=0) (X,Y) in METRES.
 
@@ -50,21 +76,7 @@ class WildtrackCamera:
         makes lam diverge) or that land outside the plaza bounds. Validated as
         necessary on real WILDTRACK data (far/near-horizon foot points otherwise
         project to thousands of metres). Returns only the surviving (M,2) points."""
-        uv = np.atleast_2d(np.asarray(uv, float))
-        if not len(uv):
-            return np.zeros((0, 2))
-        pix = np.hstack([uv, np.ones((len(uv), 1))])
-        d_cam = (self.Kinv @ pix.T).T          # ray dir in camera frame
-        d_world = (self.R.T @ d_cam.T).T       # rotate to world
-        with np.errstate(divide="ignore", invalid="ignore"):
-            lam = -self.C[2] / d_world[:, 2]   # intersect Z=0
-        XY = (self.C[None, :] + lam[:, None] * d_world)[:, :2] * self.s
-        if bounds is None:
-            return XY
-        x0, y0, x1, y1 = bounds
-        ok = ((d_world[:, 2] < -1e-9) & (lam > 0) & np.isfinite(XY).all(axis=1)
-              & (XY[:, 0] > x0) & (XY[:, 0] < x1) & (XY[:, 1] > y0) & (XY[:, 1] < y1))
-        return XY[ok]
+        return self.to_plane(uv, 0.0, bounds)
 
     # multicam.MultiCameraFusion only needs to_ground; the world frame IS common
     # across WILDTRACK cameras, so CameraView(R=I, t=0) wraps this directly.
