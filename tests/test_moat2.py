@@ -285,6 +285,40 @@ def test_multicam_same_view_not_merged_and_world_transform():
 
 
 # --------------------------------------------------------------------------- #
+# 7. WILDTRACK calibration geometry (real-calib ground projection)
+# --------------------------------------------------------------------------- #
+def test_wildtrack_camera_ground_projection():
+    import cv2
+
+    from flowsight.geometry.wildtrack import WildtrackCamera, match_to_gt
+
+    # synthetic camera (cm world): centre elevated, looking down at the ground
+    K = np.array([[900.0, 0, 960], [0, 900.0, 540], [0, 0, 1]])
+    C = np.array([0.0, -500.0, 300.0])  # cm
+    fwd = (np.array([0.0, 200.0, 0.0]) - C)
+    fwd /= np.linalg.norm(fwd)
+    up = np.array([0.0, 0.0, 1.0])
+    x = np.cross(fwd, up); x /= np.linalg.norm(x)
+    y = np.cross(fwd, x)
+    R = np.stack([x, y, fwd], 0)            # world->cam
+    t = -R @ C
+    rvec, _ = cv2.Rodrigues(R)
+
+    gt_cm = np.array([[0, 200, 0], [150, 250, 0], [-150, 150, 0], [100, 400, 0]], float)
+    uv, _ = cv2.projectPoints(gt_cm, rvec, t, K, None)
+    uv = uv.reshape(-1, 2)
+
+    cam = WildtrackCamera(K, rvec=rvec, tvec=t, unit_scale=0.01)
+    rec_m = cam.to_ground(uv)               # metres
+    true_m = gt_cm[:, :2] * 0.01
+    assert np.abs(rec_m - true_m).max() < 1e-3, np.abs(rec_m - true_m).max()
+
+    # GT matcher: perfect preds -> recall 1.0; an extra spurious pred -> precision<1
+    m = match_to_gt(np.vstack([true_m, [[9.0, 9.0]]]), true_m, radius_m=0.5)
+    assert m["recall"] > 0.999 and m["fp"] == 1 and m["tp"] == 4
+
+
+# --------------------------------------------------------------------------- #
 # plain-python fallback runner (no pytest needed)
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
