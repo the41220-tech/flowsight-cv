@@ -1,6 +1,6 @@
 # FlowSight AI — Project Handoff & Continuation Log
 
-**Last updated:** 2026-06-22 (MOAT layer 2: absolute 0.02/s² alarm + non-planar 3-D metric depth)
+**Last updated:** 2026-06-23 (WILDTRACK real multi-camera + absolute-scale validation; GLM/fugu reporting; roadmap loop)
 **Owner:** 감경민 (POSCO 청년 AI·Big Data 아카데미 project)
 **Canonical repo:** https://github.com/the41220-tech/flowsight-cv
 **Working folder:** `~/Desktop/magi/flowsight-cv` (this repo)
@@ -8,6 +8,72 @@
 > ⚠️ **Repo note:** Use ONLY `flowsight-cv`. The older repo `the41220-tech/flowsight`
 > was reused for a separate project ("트레이너ZIP / mytrainer MCP", TypeScript) and is
 > cross-contaminated — do NOT push FlowSight there.
+
+---
+
+## 0. LATEST STATE (2026-06-23) — read this first
+
+**Headline:** the physics/geometry **moat is now validated on REAL surveyed data** (WILDTRACK),
+not just synthetic. Multi-camera fusion's value is demonstrated on real footage. Tests **27/27**.
+Overall ~**70%** of the hard tech; physics moat ~**90%**.
+
+### WILDTRACK real multi-camera + absolute-scale validation (Stage 7 progress)
+- **Data obtained the hard way:** the EPFL 6.8 GB `Wildtrack_dataset_full.zip` is **corrupt**
+  (>4 GB central-directory offset wrap → `unzip`/`7z`/python-`zipfile` all fail "overlapped
+  components / bad magic"; `zip -FF` rebuilds the dir but offsets still wrong). **Solution that
+  works:** a **custom SEQUENTIAL local-header parser** (scan `PK\x03\x04` from byte 0, use the
+  local-header compressed size — immune to the offset wrap). Extracted C1=401 + C2=401 frames +
+  21 calibration files + 400 annotations (0 bad).
+- **MOAT GEOMETRY EXACT ON REAL CALIB:** foot-pixel→ground round-trip error **0.0000 m**; GT
+  positionID→world matches the official **12×36 m** plaza exactly; GT reprojects **100% in-image**.
+  → the metric/absolute-scale claim is proven on real surveyed data.
+- **Multi-camera fusion (near-horizon clamp + auto camera↔folder mapping):** 1-camera recall
+  **0.085** → 2-camera **0.102** (true-positives **54→65**), localization error **0.60 m** →
+  **fusion measurably fills occlusions on real data (2-cam > 1-cam).**
+- **Absolute density on real ground:** GT peak **1.05–1.27/m²** (physically plausible).
+- **HONEST GAP:** absolute end-to-end recall ~**10%** = naive COCO foot-point projection on dense
+  crowds from only 2 of 7 views (SOTA learned multi-view ~90%) — a **detection-method gap, NOT a
+  moat-geometry issue.** FT-2 (drone domain) would be *worse* here; the fix is a learned multi-view
+  detector (MVDet-style).
+- Convention nailed down: WILDTRACK grid origin is the **official `(-300, -90)` cm** (from
+  `intersecting_area.py`), NOT MVDet's `-900` (the two frames differ by 8.1 m in Y).
+
+### Code fixes this session (in repo `flowsight/geometry/wildtrack.py`, NOT yet pushed)
+- Fixed 3 integration bugs (would have crashed/wrecked the first real run): positionID origin
+  `-900→-90`; `wildtrack_validate.py` double-projection (now passes foot **pixels** to `fuse`);
+  extrinsic parsing (real WILDTRACK `<rvec>/<tvec>` are **plain-text** → rewrote loader on
+  ElementTree, handles matrix + text).
+- **Loop Cycle 1:** added **near-horizon clamp** to `WildtrackCamera.to_ground(uv, bounds=…)`
+  (backward-compatible: `bounds=None` unchanged) + a clamp test → **tests 27/27**.
+- New: `experiments/wildtrack_selftest.py` (synthetic-calib self-test, OpenCV projectPoints as GT),
+  `tests/test_wildtrack.py` (5 tests).
+
+### Reporting + roadmap loop (extra-llms: GLM + Sakana fugu)
+- `mcp__extra-llms__ask_model` providers: **glm** (glm-5.2), **fugu** / **fugu-ultra** (api.sakana.ai),
+  all keys set. **Contract: EXPLICIT-USE ONLY — never call autonomously / to self-verify.**
+  fugu **times out on long prompts** → keep prompts + `max_tokens` small.
+- Pipeline run: GLM summarized achievements → **Claude verified** (re-ran tests 26/26 live, faithful)
+  → **fugu wrote the report** → finalized to **`docs/FINAL_REPORT_2026-06-23.md`**.
+- **`docs/ROADMAP_LOOP.md`** = fugu-led **verify→fix→report** loop: fugu proposes/reviews, **Claude
+  implements+verifies** (only one with tools), **USER-TRIGGERED per cycle** ("다음 사이클") — no
+  unattended/scheduled fugu calls (contract). Backlog: E① wire clamp into `wildtrack_validate.py`
+  → 7-view quantitative → cross-view track association → learned multi-view detector.
+
+### ⚠️ CRITICAL — PENDING PUSH (run on the user's Mac; sandbox cannot push)
+All 2026-06-23 changes are saved locally but **not committed/pushed**:
+```bash
+cd ~/Desktop/magi/flowsight-cv && rm -f .git/index.lock .git/HEAD.lock
+git add -A && git commit -m "WILDTRACK real validation + clamp + final report + roadmap loop; tests 27/27" && git push
+```
+Files: `flowsight/geometry/wildtrack.py`, `experiments/wildtrack_validate.py`, `experiments/wildtrack_selftest.py`, `experiments/__init__.py`, `tests/test_wildtrack.py`, `docs/{wildtrack_validation_2026-06-23,FINAL_REPORT_2026-06-23,ROADMAP_LOOP}.md` (+ earlier-pending `flowsight/anomaly/{alarm_gate,__init__}.py`, `tests/test_anomaly.py`, violence_train top1 fix).
+
+### WILDTRACK resume notes (Colab)
+- Validation scripts were deployed ad-hoc to Colab (`/content/wt_all.py`, `wt_all3.py`, `wt_diag.py`)
+  — **not in the repo**; they live in this session's scratch. The real-data run used `wt_all3.py`
+  (sequential extract + clamp + auto-map + eval). To re-run: get clean WILDTRACK (the custom parser
+  on `/content/WT.zip`, or Kaggle `aryashah2k/large-scale-multicamera-detection-dataset`), then run.
+- Env now: **Colab Pro, L4 GPU**; Drive mounted; FT-2 weights at `/content/drive/MyDrive/flowsight_ckpt/chunk05_best.pt`.
+  Colab still idle-disconnects — but **"다시 연결" preserved /content (same VM)** this session.
 
 ---
 
@@ -56,7 +122,7 @@ same 3D-positioned flow field is the substrate for every other application above
 | 4 | Multi-model recall benchmark (found weakness = drone / small objects) | ✅ done |
 | 5 | Detector fine-tuning — FT-1 → **FT-2** (fix CCTV forgetting, keep drone) | ✅ done |
 | 6 | Multimodal slope → disaster prediction (H1·H2·H6·H7 + real-recall) + real-video anomaly detection | ✅ **DONE** (synthetic-GT physics + real FT-2 recall; **real-video DONE** on UMN panic, §7) |
-| 7 | Multi-camera fusion + object ID (LLM) + external-data validation + edge deploy | ⬜ not started |
+| 7 | Multi-camera fusion + object ID (LLM) + external-data validation + edge deploy | ◐ **in progress (2026-06-23)** — WILDTRACK multi-cam fusion + absolute-scale **validated on real data** (geometry exact 0.0000 m; 2-cam>1-cam recall); see §0. Object-ID/VLM, learned multi-view detector, edge still pending |
 
 **Stage 6 caveat:** the physics (pressure/slope) is verified on a Social-Force **synthetic**
 ground truth with the **real FT-2 detector recall** plugged in. Real-crowd-video solidification

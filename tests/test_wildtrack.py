@@ -50,6 +50,25 @@ def test_absolute_density_is_physical():
     assert 0.0 < dense_peak < 12.0                            # plausible persons/m^2
 
 
+def test_to_ground_near_horizon_clamp():
+    """Production clamp keeps in-bounds plaza points, drops near-horizon rays
+    (validated as necessary on real WILDTRACK data)."""
+    import tempfile
+    import numpy as np
+    from experiments.wildtrack_selftest import build_scene, project, _spaced_people
+    bounds = (-10.0, -12.0, 20.0, 45.0)
+    with tempfile.TemporaryDirectory() as d:
+        cams, raw = build_scene(d)
+        cam = cams["CVLab1"]
+        gt = _spaced_people()
+        kept = cam.to_ground(project(*raw["CVLab1"], gt), bounds=bounds)
+        assert len(kept) == len(gt)                          # valid plaza points survive
+        assert (kept[:, 0] > bounds[0]).all() and (kept[:, 1] < bounds[3]).all()
+        top = np.array([[960.0, 2.0]])                       # top-row pixel ~ horizon
+        assert len(cam.to_ground(top)) == 1                  # unclamped returns it
+        assert len(cam.to_ground(top, bounds=bounds)) == 0   # clamp drops it
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
