@@ -264,6 +264,29 @@ def test_anchor_calibrated_beats_foot_when_occluded():
         assert best_err < foot_err and foot_err > 0.2      # calibrated recovers, foot errs
 
 
+def test_bev_recall_calibrated_beats_foot():
+    """Cycle9: end-to-end BEV recall — calibrated anchor > foot when bbox bottom
+    is not the ground-contact point (synthetic, mock detector boxes)."""
+    import tempfile
+    from experiments.recall_bev import bev_recall
+    from experiments.wildtrack_selftest import build_scene
+    from flowsight.eval.anchor_proj import calibrate_alpha
+    with tempfile.TemporaryDirectory() as d:
+        cams, raw = build_scene(d)
+        cam = cams["CVLab1"]; K, rvec, tvec = raw["CVLab1"]
+        W = np.array([[x, y] for x in np.linspace(-1, 7, 4) for y in np.linspace(2, 30, 4)])
+        boxes = []
+        for (x, y) in W:
+            head = _proj3d(K, rvec, tvec, [[x, y, 1.7]])[0]
+            knee = _proj3d(K, rvec, tvec, [[x, y, 0.5]])[0]   # bbox bottom = knee, NOT feet
+            boxes.append([head[0] - 8, head[1], head[0] + 8, knee[1], 0.9])
+        boxes = np.array(boxes)
+        a_star, _ = calibrate_alpha(cam, boxes, W, grid=np.linspace(0.5, 2.5, 81))
+        foot = bev_recall(cam, [boxes], [W], 1.0, 1.0)
+        cal = bev_recall(cam, [boxes], [W], a_star, 1.0)
+        assert cal["recall"] > foot["recall"]                 # calibrated anchor wins end-to-end
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
