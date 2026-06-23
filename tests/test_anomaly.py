@@ -107,6 +107,25 @@ def test_torso_angle_and_fall():
     assert r["n_fall"] == 1 and r["falls"][0]["lying"]
 
 
+def test_hysteresis_gate_collapses_overfiring():
+    from flowsight.anomaly import HysteresisEventGate, naive_event_frames
+    # noisy signal: two real high episodes (with brief internal dips) + baseline noise
+    rng = np.random.default_rng(0)
+    t = np.arange(0, 60, 0.5)
+    v = rng.uniform(0, 0.18, size=t.shape)          # noisy baseline near/over thresh
+    ep1 = (t >= 10) & (t < 16)
+    ep2 = (t >= 35) & (t < 42)
+    v[ep1] = rng.uniform(0.25, 0.6, size=ep1.sum())
+    v[ep2] = rng.uniform(0.25, 0.6, size=ep2.sum())
+    v[(t >= 12.5) & (t < 13.5)] = 0.05               # brief dip inside episode 1
+    naive = naive_event_frames(v, 0.2)               # many frame-flags (over-firing)
+    gate = HysteresisEventGate(t_high=0.25, t_low=0.15, k_on=2, merge_gap_s=3.0)
+    events = gate.run(t, v)
+    assert len(events) == 2, (len(events), events)   # exactly two discrete episodes
+    assert naive > 10                                 # naive over-fires badly
+    assert events[0] >= 10 and events[1] >= 35        # events at the right times
+
+
 def test_fall_event_height_drop():
     from flowsight.anomaly import FallDetector
     det = FallDetector(aspect_thresh=99, drop_frac=0.35, window=3)  # disable aspect

@@ -12,6 +12,7 @@ from .detectors import (  # noqa: F401
     RadialDivergenceDetector,
     TerrorComposite,
 )
+from .alarm_gate import HysteresisEventGate, naive_event_frames  # noqa: F401
 from .fall import FallDetector, confirm_with_void, torso_angle_deg  # noqa: F401
 from .narrate import narrate  # noqa: F401
 from .violence import ViolenceDetector, _fight_index  # noqa: F401
