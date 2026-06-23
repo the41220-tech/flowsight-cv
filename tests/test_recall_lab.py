@@ -319,6 +319,44 @@ def test_head_anchor_beats_global_alpha_under_heterogeneous_occlusion():
         assert head_err < alpha_err and head_err < 0.5     # head anchor wins, no fitting
 
 
+def test_weighted_fusion_beats_unweighted_with_noisy_camera():
+    """H3 (Cycle10): uncertainty-aware fusion (sigma gate + inverse-variance centroid)
+    beats unweighted greedy fusion when a NOISY oblique camera (near-horizon spurious
+    detections, huge sigma) is added. (a) recall rises via occlusion fill, (b) sigma-
+    gating keeps precision from collapsing on horizon FPs, (c) the weighted centroid is
+    not pulled by the noisy view. Falsifiable: fails if unweighted matches weighted."""
+    import tempfile
+    import cv2
+    from experiments.wildtrack_selftest import _look_at, _K, _write_wildtrack_xml, project
+    from flowsight.geometry.wildtrack import load_camera, match_to_gt
+    from flowsight.geometry.multicam import CameraView, MultiCameraFusion
+    rng = np.random.default_rng(0)
+    with tempfile.TemporaryDirectory() as d:
+        K = _K()
+        Rn, tn = _look_at(np.array([3, 17, 9.0]) * 100, np.array([3, 17, 0.0]) * 100)  # near top-down
+        Ro, to = _look_at(np.array([3, 48, 3.0]) * 100, np.array([3, 22, 0.0]) * 100)  # oblique grazing
+        rn = cv2.Rodrigues(Rn)[0].reshape(-1); ro = cv2.Rodrigues(Ro)[0].reshape(-1)
+        inn, enn = _write_wildtrack_xml(d, "NEAR", K, rn, tn)
+        ino, eno = _write_wildtrack_xml(d, "OBLQ", K, ro, to)
+        near = load_camera(inn, enn, 0.01); oblq = load_camera(ino, eno, 0.01)
+        people = np.array([[1.0 + ix * 2.0, 12.0 + iy * 3.0] for ix in range(4) for iy in range(5)], float)
+        dN = project(K, rn, tn, people) + rng.normal(0, 2, (len(people), 2))
+        dN_half = dN[:10]                                       # near OCCLUDED for half
+        dO = project(K, ro, to, people) + rng.normal(0, 2, (len(people), 2))
+        horizon = project(K, ro, to, np.array([[3.0, 160.0]]))[0]   # near-horizon pixel row
+        spur = np.array([[K[0, 2] + rng.uniform(-300, 300), horizon[1] + rng.uniform(2, 18)]
+                         for _ in range(6)])                   # spurious horizon detections (huge sigma)
+        dO_noisy = np.vstack([dO, spur])
+        fus = MultiCameraFusion([CameraView("NEAR", near), CameraView("OBLQ", oblq)], assoc_radius_m=1.5)
+        r_near = match_to_gt(near.to_ground(dN_half), people, 1.0)["recall"]
+        unw = match_to_gt(fus.fuse({"NEAR": dN_half, "OBLQ": dO_noisy})["fused"], people, 1.0)
+        wt = match_to_gt(fus.fuse_weighted({"NEAR": dN_half, "OBLQ": dO_noisy},
+                                           sigma_px=2.0, sigma_gate=2.0)["fused"], people, 1.0)
+        assert wt["recall"] > r_near                            # occlusion fill (2nd cam adds people)
+        assert wt["precision"] > unw["precision"]               # gating kills horizon FPs
+        assert wt["mean_loc_err_m"] < unw["mean_loc_err_m"]     # inverse-variance centroid
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
