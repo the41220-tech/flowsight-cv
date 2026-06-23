@@ -83,21 +83,23 @@ def main(a) -> None:
         fid = os.path.splitext(os.path.basename(af))[0]
         gt = _load_gt(af, a)
         gtN += len(gt)
-        dets_world = {}
+        dets_px = {}
         for c in use:
             fp = per_cam_frames[c].get(fid)
             if fp is None:
                 continue
             r = model.predict(fp, classes=[0], conf=a.conf, imgsz=a.imgsz, verbose=False)[0]
             if r.boxes is None or not len(r.boxes):
-                dets_world[c] = np.zeros((0, 2))
+                dets_px[c] = np.zeros((0, 2))
                 continue
             b = r.boxes.xyxy.cpu().numpy()
-            foot = np.column_stack([(b[:, 0] + b[:, 2]) / 2.0, b[:, 3]])
-            dets_world[c] = wcams[c].to_ground(foot)
-        # single-camera (first cam only) vs multi-camera fusion
-        s_pred = dets_world.get(use[0], np.zeros((0, 2)))
-        m_pred = fusion.fuse(dets_world)["fused"]
+            dets_px[c] = np.column_stack([(b[:, 0] + b[:, 2]) / 2.0, b[:, 3]])  # foot pixels
+        # MultiCameraFusion.fuse() projects pixels -> world itself; pass PIXELS (not
+        # pre-projected world) or it would apply to_ground twice. Single-cam = first
+        # view projected directly.
+        s_pred = (wcams[use[0]].to_ground(dets_px[use[0]])
+                  if use[0] in dets_px else np.zeros((0, 2)))
+        m_pred = fusion.fuse(dets_px)["fused"]
         _acc(single, match_to_gt(s_pred, gt, a.match_m))
         _acc(multi, match_to_gt(m_pred, gt, a.match_m))
         if len(m_pred):
@@ -163,5 +165,5 @@ if __name__ == "__main__":
     ap.add_argument("--grid-w", type=int, default=480)
     ap.add_argument("--step-cm", type=float, default=2.5)
     ap.add_argument("--origin-x", type=float, default=-300.0)
-    ap.add_argument("--origin-y", type=float, default=-900.0)
+    ap.add_argument("--origin-y", type=float, default=-90.0)  # official WILDTRACK frame
     main(ap.parse_args())

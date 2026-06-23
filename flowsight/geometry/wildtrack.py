@@ -58,41 +58,69 @@ class WildtrackCamera:
         return self.to_ground(np.atleast_2d(uv) + np.atleast_2d(v_px)) - g0
 
 
-def _read_opencv_xml(path: str, keys):
-    """Read named matrices from an OpenCV XML/YAML calibration file."""
-    import cv2
+def _vec_from_node(node):
+    """Flat float list from an XML calibration node.
 
-    fs = cv2.FileStorage(path, cv2.FILE_STORAGE_READ)
-    out = {}
-    for k in keys:
-        node = fs.getNode(k)
-        out[k] = node.mat() if not node.empty() else None
-    fs.release()
-    return out
+    Handles BOTH formats WILDTRACK ships:
+      * OpenCV matrix nodes  -> ``<x type_id="opencv-matrix"><data>...</data></x>``
+        (used by the intrinsic files: camera_matrix, distortion_coefficients), and
+      * plain-text vectors   -> ``<rvec>r0 r1 r2</rvec>`` (used by the extrinsic
+        files; the official toolkit reads these with minidom, NOT FileStorage).
+    """
+    if node is None:
+        return None
+    data = node.find("data")
+    text = data.text if data is not None else node.text
+    if not text or not text.strip():
+        return None
+    return [float(x) for x in text.replace(",", " ").split()]
+
+
+def _read_calibration_xml(path: str, names):
+    import xml.etree.ElementTree as ET
+
+    root = ET.parse(path).getroot()
+    return {n: _vec_from_node(root.find(n)) for n in names}
 
 
 def load_camera(intr_path: str, extr_path: str, unit_scale: float = 0.01) -> WildtrackCamera:
-    """Load one camera from its intrinsic + extrinsic OpenCV XML files.
+    """Load one camera from its intrinsic + extrinsic WILDTRACK XML files.
 
-    Tries the common WILDTRACK key names; the actual keys are verified against the
-    extracted files (see load_all's autodetect).
+    Robust to the real WILDTRACK layout (intrinsic = OpenCV matrices, extrinsic =
+    plain-text rvec/tvec) as well as plain OpenCV-matrix extrinsics, parsed with
+    ElementTree (matches the official ``intersecting_area.py``).
     """
-    intr = _read_opencv_xml(intr_path, ["camera_matrix", "cameraMatrix", "K"])
-    K = next(v for v in intr.values() if v is not None)
-    extr = _read_opencv_xml(extr_path, ["rvec", "tvec", "R", "T", "rotation", "translation"])
-    rvec = extr.get("rvec") if extr.get("rvec") is not None else extr.get("rotation")
-    tvec = extr.get("tvec") if extr.get("tvec") is not None else (
-        extr.get("translation") if extr.get("translation") is not None else extr.get("T"))
-    R = extr.get("R")
-    if rvec is not None:
-        return WildtrackCamera(K, rvec=rvec, tvec=tvec, unit_scale=unit_scale)
-    return WildtrackCamera(K, R=R, tvec=tvec, unit_scale=unit_scale)
+    intr = _read_calibration_xml(intr_path, ["camera_matrix", "cameraMatrix", "K"])
+    Kvals = intr.get("camera_matrix") or intr.get("cameraMatrix") or intr.get("K")
+    if not Kvals or len(Kvals) < 9:
+        raise ValueError("camera_matrix (>=9 values) not found in %s" % intr_path)
+    K = np.asarray(Kvals[:9], float).reshape(3, 3)
+
+    extr = _read_calibration_xml(
+        extr_path, ["rvec", "tvec", "rotation", "translation", "R", "T"])
+    rvec = extr.get("rvec") or extr.get("rotation")
+    tvec = extr.get("tvec") or extr.get("translation") or extr.get("T")
+    Rvals = extr.get("R")
+    if not tvec or len(tvec) < 3:
+        raise ValueError("tvec (>=3 values) not found in %s" % extr_path)
+    if rvec and len(rvec) >= 3:
+        return WildtrackCamera(K, rvec=np.asarray(rvec[:3], float),
+                               tvec=np.asarray(tvec[:3], float), unit_scale=unit_scale)
+    if Rvals and len(Rvals) >= 9:
+        return WildtrackCamera(K, R=np.asarray(Rvals[:9], float).reshape(3, 3),
+                               tvec=np.asarray(tvec[:3], float), unit_scale=unit_scale)
+    raise ValueError("neither rvec nor R found in %s" % extr_path)
 
 
 def positionid_to_world(pid, grid_w: int = 480, step_cm: float = 2.5,
-                        origin_cm=(-300.0, -900.0), unit_scale: float = 0.01):
+                        origin_cm=(-300.0, -90.0), unit_scale: float = 0.01):
     """WILDTRACK positionID -> world (X,Y) metres. grid index: x=pid%W, y=pid//W.
-    (Defaults follow the standard MVDet grid; verify origin/step against the data.)"""
+
+    Defaults follow the OFFICIAL WILDTRACK toolkit (``intersecting_area.py``):
+    grid 1440x480, origin (-300, -90) cm, step 2.5 cm -> X span ~12 m (480 cells),
+    Y span ~36 m (1440 cells). NOTE: MVDet uses origin_y=-900, but the calibration
+    files shipped WITH the dataset are consistent with -90, so that is the default
+    here (the two frames differ by 8.1 m in Y)."""
     pid = np.asarray(pid)
     gx = pid % grid_w
     gy = pid // grid_w
