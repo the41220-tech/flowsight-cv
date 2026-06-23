@@ -244,6 +244,47 @@ def test_depth_calibrator_horizon_clamp():
 
 
 # --------------------------------------------------------------------------- #
+# 6. Multi-camera fusion (Phase E foundation)
+# --------------------------------------------------------------------------- #
+class _IdentityCal:
+    """Stub calibrator: treats input pixels AS world metres (for fusion tests)."""
+
+    def to_ground(self, uv):
+        return np.atleast_2d(np.asarray(uv, float))
+
+
+def test_multicam_fusion_dedup_and_occlusion_fill():
+    from flowsight.geometry.multicam import CameraView, MultiCameraFusion
+
+    A = CameraView("A", _IdentityCal())
+    B = CameraView("B", _IdentityCal())
+    fuse = MultiCameraFusion([A, B], assoc_radius_m=1.5)
+    dets = {
+        "A": np.array([[0.0, 0.0], [5.0, 0.0], [10.0, 0.0]]),       # people 1,2,3
+        "B": np.array([[5.1, 0.1], [10.0, -0.1], [15.0, 0.0]]),    # 2,3 overlap + new 4
+    }
+    out = fuse.fuse(dets)
+    assert out["n_fused"] == 4               # deduped union (1,2,3,4)
+    assert out["multi_view"] == 2            # people 2 & 3 confirmed by both cams
+    # occlusion fill: the A-only person at (0,0) survives
+    assert np.min(np.linalg.norm(out["fused"] - np.array([0.0, 0.0]), axis=1)) < 0.5
+
+
+def test_multicam_same_view_not_merged_and_world_transform():
+    from flowsight.geometry.multicam import CameraView, MultiCameraFusion
+
+    # two close people in ONE view must NOT collapse into one
+    A = CameraView("A", _IdentityCal())
+    fuse = MultiCameraFusion([A], assoc_radius_m=1.5)
+    out = fuse.fuse({"A": np.array([[0.0, 0.0], [1.0, 0.0]])})
+    assert out["n_fused"] == 2
+
+    # rigid transform: B's ground (0,0) -> common world (100,0)
+    B = CameraView("B", _IdentityCal(), world_t=(100.0, 0.0))
+    assert np.allclose(B.to_world(np.array([[0.0, 0.0]]))[0], [100.0, 0.0])
+
+
+# --------------------------------------------------------------------------- #
 # plain-python fallback runner (no pytest needed)
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":

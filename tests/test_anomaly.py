@@ -84,6 +84,38 @@ def test_narrate():
     assert "테러" in s and "폭력" in s and "5.0" in s
 
 
+def test_torso_angle_and_fall():
+    from flowsight.anomaly import FallDetector, torso_angle_deg
+    # standing: shoulders above hips (vertical torso) -> ~0 deg
+    standing = np.zeros((17, 3))
+    standing[:, 2] = 0.9
+    standing[5] = [9, 10, 0.9]; standing[6] = [11, 10, 0.9]      # shoulders y=10
+    standing[11] = [9, 30, 0.9]; standing[12] = [11, 30, 0.9]    # hips y=30 (below)
+    assert torso_angle_deg(standing) < 20
+    # lying: shoulders and hips at same height, spread in x -> ~90 deg
+    lying = standing.copy()
+    lying[5] = [10, 20, 0.9]; lying[6] = [10, 20, 0.9]
+    lying[11] = [40, 20, 0.9]; lying[12] = [40, 20, 0.9]
+    assert torso_angle_deg(lying) > 70
+
+    det = FallDetector(aspect_thresh=1.1)
+    # standing bbox: tall (h>w) -> not lying
+    r = det.step([{"id": 1, "bbox": [0, 0, 20, 60]}])
+    assert r["n_fall"] == 0
+    # lying bbox: wide (w>h) -> lying
+    r = det.step([{"id": 2, "bbox": [0, 0, 60, 20]}])
+    assert r["n_fall"] == 1 and r["falls"][0]["lying"]
+
+
+def test_fall_event_height_drop():
+    from flowsight.anomaly import FallDetector
+    det = FallDetector(aspect_thresh=99, drop_frac=0.35, window=3)  # disable aspect
+    for _ in range(3):  # standing, height 60
+        det.step([{"id": 7, "bbox": [0, 0, 20, 60]}])
+    r = det.step([{"id": 7, "bbox": [0, 40, 20, 70]}])  # height 30 -> 50% drop
+    assert r["n_fall"] == 1 and r["falls"][0]["fall_event"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
