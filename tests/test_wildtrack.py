@@ -69,6 +69,68 @@ def test_to_ground_near_horizon_clamp():
         assert len(cam.to_ground(top, bounds=bounds)) == 0   # clamp drops it
 
 
+def test_cameraview_to_world_bounds_drops_out_of_range():
+    """CameraView.to_world(foot_uv, bounds=...) must drop pixels whose ground
+    projection falls outside the given bounds — relies on WildtrackCamera.to_ground."""
+    import tempfile
+    import numpy as np
+    from experiments.wildtrack_selftest import build_scene, project, _spaced_people
+    from flowsight.geometry.multicam import CameraView
+    # narrow bounds that exclude the top-row near-horizon pixel but keep plaza points
+    bounds = (-10.0, -12.0, 20.0, 45.0)
+    with tempfile.TemporaryDirectory() as d:
+        cams, raw = build_scene(d)
+        cam = cams["CVLab1"]
+        view = CameraView("CVLab1", cam)
+        gt = _spaced_people()
+        px = project(*raw["CVLab1"], gt)
+        # All valid plaza pixels should survive
+        world_all = view.to_world(px, bounds=bounds)
+        assert len(world_all) == len(gt), (
+            "expected %d points, got %d" % (len(gt), len(world_all)))
+        # A near-horizon pixel (top row) should be dropped when bounds provided
+        top = np.array([[960.0, 2.0]])
+        world_no_bounds = view.to_world(top)
+        world_with_bounds = view.to_world(top, bounds=bounds)
+        assert len(world_no_bounds) == 1, "unclamped should return 1 point"
+        assert len(world_with_bounds) == 0, "clamped should drop near-horizon pixel"
+
+
+def test_multicamfusion_fuse_bounds_drops_out_of_range():
+    """MultiCameraFusion.fuse(dets, bounds=...) must exclude detections that
+    project outside the given bounds from the fused result."""
+    import tempfile
+    import numpy as np
+    from experiments.wildtrack_selftest import build_scene, project, _spaced_people
+    from flowsight.geometry.multicam import CameraView, MultiCameraFusion
+    # tight bounds that contain all _spaced_people but exclude near-horizon pixels
+    bounds = (-5.0, -5.0, 15.0, 40.0)
+    with tempfile.TemporaryDirectory() as d:
+        cams, raw = build_scene(d)
+        views = [CameraView(nm, cams[nm]) for nm in cams]
+        fusion = MultiCameraFusion(views, assoc_radius_m=1.0)
+        gt = _spaced_people()
+        # Normal in-bounds detections: all should survive fusion
+        dets_normal = {nm: project(*raw[nm], gt) for nm in cams}
+        result_normal = fusion.fuse(dets_normal, bounds=bounds)
+        assert result_normal["n_fused"] == len(gt), (
+            "expected %d fused, got %d" % (len(gt), result_normal["n_fused"]))
+        # Add a near-horizon pixel (top row) to one camera: should NOT appear in fusion
+        top_px = np.array([[960.0, 2.0]])
+        dets_with_horizon = dict(dets_normal)
+        cam0 = list(cams.keys())[0]
+        dets_with_horizon[cam0] = np.vstack([dets_normal[cam0], top_px])
+        result_with_horizon = fusion.fuse(dets_with_horizon, bounds=bounds)
+        # Fused count should still equal len(gt): the extra horizon pixel is clamped out
+        assert result_with_horizon["n_fused"] == len(gt), (
+            "horizon pixel leaked into fusion: expected %d fused, got %d"
+            % (len(gt), result_with_horizon["n_fused"]))
+        # Without bounds, the extra pixel adds one spurious detection
+        result_unclamped = fusion.fuse(dets_with_horizon)
+        assert result_unclamped["n_fused"] > len(gt), (
+            "expected extra spurious detection without bounds clamping")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

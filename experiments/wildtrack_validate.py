@@ -30,6 +30,9 @@ from flowsight.geometry.multicam import CameraView, MultiCameraFusion
 from flowsight.geometry.wildtrack import WildtrackCamera, load_camera, match_to_gt
 from flowsight.physics.density import DensityField
 
+# WILDTRACK plaza bounds [m] — official grid: origin (-3, -0.9) m, 480×1440 cells × 0.025m
+GROUND_BOUNDS = (-3.0, -0.9, 9.0, 35.1)  # x0, y0, x1, y1
+
 
 def _find(root, *parts):
     hits = glob.glob(os.path.join(root, *parts))
@@ -97,9 +100,9 @@ def main(a) -> None:
         # MultiCameraFusion.fuse() projects pixels -> world itself; pass PIXELS (not
         # pre-projected world) or it would apply to_ground twice. Single-cam = first
         # view projected directly.
-        s_pred = (wcams[use[0]].to_ground(dets_px[use[0]])
+        s_pred = (wcams[use[0]].to_ground(dets_px[use[0]], bounds=GROUND_BOUNDS)
                   if use[0] in dets_px else np.zeros((0, 2)))
-        m_pred = fusion.fuse(dets_px)["fused"]
+        m_pred = fusion.fuse(dets_px, bounds=GROUND_BOUNDS)["fused"]
         _acc(single, match_to_gt(s_pred, gt, a.match_m))
         _acc(multi, match_to_gt(m_pred, gt, a.match_m))
         if len(m_pred):

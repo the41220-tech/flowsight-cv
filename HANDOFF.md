@@ -1,6 +1,6 @@
 # FlowSight AI — Project Handoff & Continuation Log
 
-**Last updated:** 2026-06-23 (WILDTRACK real multi-camera + absolute-scale validation; GLM/fugu reporting; roadmap loop)
+**Last updated:** 2026-06-23 (Cycle 2: bounds wiring → wildtrack_validate; tests 29/29)
 **Owner:** 감경민 (POSCO 청년 AI·Big Data 아카데미 project)
 **Canonical repo:** https://github.com/the41220-tech/flowsight-cv
 **Working folder:** `~/Desktop/magi/flowsight-cv` (this repo)
@@ -38,7 +38,12 @@ Overall ~**70%** of the hard tech; physics moat ~**90%**.
 - Convention nailed down: WILDTRACK grid origin is the **official `(-300, -90)` cm** (from
   `intersecting_area.py`), NOT MVDet's `-900` (the two frames differ by 8.1 m in Y).
 
-### Code fixes this session (in repo `flowsight/geometry/wildtrack.py`, NOT yet pushed)
+### Cycle 2 (2026-06-23, NOT yet pushed)
+- **bounds wiring**: `geometry/multicam.py` `CameraView.to_world(bounds=None)` + `MultiCameraFusion.fuse(bounds=None)` 확장; `experiments/wildtrack_validate.py` `GROUND_BOUNDS=(-3.0,-0.9,9.0,35.1)` 상수 + 두 호출에 전달; `tests/test_moat2.py` 하위호환 수정.
+- 신규 테스트 2개 → **전체 29/29 통과** (moat2 12 + anomaly 10 + wildtrack 7). fugu 리뷰 통과.
+- 백로그: **E② 7뷰 전체 정량 평가(MODA/MODP)**이 다음.
+
+### Code fixes (Cycle 1, in repo `flowsight/geometry/wildtrack.py`, NOT yet pushed)
 - Fixed 3 integration bugs (would have crashed/wrecked the first real run): positionID origin
   `-900→-90`; `wildtrack_validate.py` double-projection (now passes foot **pixels** to `fuse`);
   extrinsic parsing (real WILDTRACK `<rvec>/<tvec>` are **plain-text** → rewrote loader on
@@ -60,12 +65,12 @@ Overall ~**70%** of the hard tech; physics moat ~**90%**.
   → 7-view quantitative → cross-view track association → learned multi-view detector.
 
 ### ⚠️ CRITICAL — PENDING PUSH (run on the user's Mac; sandbox cannot push)
-All 2026-06-23 changes are saved locally but **not committed/pushed**:
+All 2026-06-23 changes (Cycle 1 + Cycle 2) are saved locally but **not committed/pushed**:
 ```bash
 cd ~/Desktop/magi/flowsight-cv && rm -f .git/index.lock .git/HEAD.lock
-git add -A && git commit -m "WILDTRACK real validation + clamp + final report + roadmap loop; tests 27/27" && git push
+git add -A && git commit -m "Cycle 2: bounds wiring wildtrack_validate + multicam; WILDTRACK clamp + final report + roadmap loop; tests 29/29" && git push
 ```
-Files: `flowsight/geometry/wildtrack.py`, `experiments/wildtrack_validate.py`, `experiments/wildtrack_selftest.py`, `experiments/__init__.py`, `tests/test_wildtrack.py`, `docs/{wildtrack_validation_2026-06-23,FINAL_REPORT_2026-06-23,ROADMAP_LOOP}.md` (+ earlier-pending `flowsight/anomaly/{alarm_gate,__init__}.py`, `tests/test_anomaly.py`, violence_train top1 fix).
+Files changed (cumulative): `flowsight/geometry/wildtrack.py`, `flowsight/geometry/multicam.py`, `experiments/wildtrack_validate.py`, `experiments/wildtrack_selftest.py`, `experiments/__init__.py`, `tests/test_wildtrack.py`, `tests/test_moat2.py`, `docs/{wildtrack_validation_2026-06-23,FINAL_REPORT_2026-06-23,ROADMAP_LOOP}.md`, `HANDOFF.md` (+ earlier-pending `flowsight/anomaly/{alarm_gate,__init__}.py`, `tests/test_anomaly.py`, violence_train top1 fix).
 
 ### WILDTRACK resume notes (Colab)
 - Validation scripts were deployed ad-hoc to Colab (`/content/wt_all.py`, `wt_all3.py`, `wt_diag.py`)

@@ -247,9 +247,12 @@ def test_depth_calibrator_horizon_clamp():
 # 6. Multi-camera fusion (Phase E foundation)
 # --------------------------------------------------------------------------- #
 class _IdentityCal:
-    """Stub calibrator: treats input pixels AS world metres (for fusion tests)."""
+    """Stub calibrator: treats input pixels AS world metres (for fusion tests).
 
-    def to_ground(self, uv):
+    Accepts and ignores `bounds` so it is compatible with CameraView.to_world
+    after the Cycle 2 bounds-passthrough change."""
+
+    def to_ground(self, uv, bounds=None):
         return np.atleast_2d(np.asarray(uv, float))
 
 

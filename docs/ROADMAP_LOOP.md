@@ -19,10 +19,11 @@
 - 무인 백그라운드/스케줄로 fugu를 반복 호출하지 않는다(계약 위반 + 무감독 코드수정 위험 회피). 코드 수정은 항상 테스트 검증을 동반.
 
 ## 백로그 (우선순위)
-1. **E — 멀티카메라 하드닝(차기 핵심 해자)**: ① 근지평선 클램프를 `wildtrack_validate.py`에 연결, ② 7뷰 전체 정량 평가, ③ 교차뷰 트랙 시간연관, ④ 학습형 멀티뷰 검출기(MVDet 계열)로 recall↑.
+1. **E — 멀티카메라 하드닝(차기 핵심 해자)**: ~~① 근지평선 클램프를 `wildtrack_validate.py`에 연결~~ ✅, ② 7뷰 전체 정량 평가(MODA/MODP), ③ 교차뷰 트랙 시간연관, ④ 학습형 멀티뷰 검출기(MVDet 계열)로 recall↑.
 2. **F — 외적검증·경보 정밀도**: WILDTRACK 정량(MODA/MODP), `HysteresisEventGate`를 anomaly/absolute/terror 러너에 연결, FT-3(CCTV recall).
 3. **D — VLM 설명**: `narrate_vlm`(Qwen2.5-VL) 실연결.
 4. 객체ID/개방어휘, 엣지 배포(v3).
 
 ## 사이클 로그
 - **Cycle 1 (2026-06-23, 완료)** — *제안*: 실데이터에서 입증된 근지평선 투영 발산 → 클램프 필요. *수정*: `geometry/wildtrack.py`의 `to_ground(uv, bounds=...)`에 근지평선/경계 클램프 추가(기존 무인자 경로는 불변=하위호환). *검증*: `tests/test_wildtrack.py`에 클램프 테스트 추가 → **전체 27/27 통과**(moat2 12 + anomaly 10 + wildtrack 5). *다음*: 클램프를 `wildtrack_validate.py`에 연결(백로그 E①).
+- **Cycle 2 (2026-06-23, 완료)** — *제안(fugu)*: bounds를 validation 경로 전체에 전달 + `GROUND_BOUNDS=(-3.0,-0.9,9.0,35.1)` 상수화. *수정*: `geometry/multicam.py` `CameraView.to_world(bounds=None)` + `MultiCameraFusion.fuse(bounds=None)` 시그니처 확장; `experiments/wildtrack_validate.py` `GROUND_BOUNDS` 상수 + 두 호출(single-cam, fuse)에 전달; `tests/test_moat2.py` `_IdentityCal` 하위호환 수정. *검증*: `tests/test_wildtrack.py` 신규 2개 추가(bounds 연동 + fuse bounds) → **전체 29/29 통과**(moat2 12 + anomaly 10 + wildtrack 7). *fugu 리뷰*: 모든 수용 기준 충족, 하위호환성 양호. *다음*: E② 7뷰 전체 정량 평가(MODA/MODP).

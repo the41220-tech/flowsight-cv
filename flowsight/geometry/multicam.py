@@ -26,11 +26,15 @@ class CameraView:
         self.R = np.eye(2) if world_R is None else np.asarray(world_R, float).reshape(2, 2)
         self.t = np.zeros(2) if world_t is None else np.asarray(world_t, float).reshape(2)
 
-    def to_world(self, foot_uv: np.ndarray) -> np.ndarray:
-        """Foot pixels (N,2) -> common-world metres (N,2)."""
+    def to_world(self, foot_uv: np.ndarray, bounds=None) -> np.ndarray:
+        """Foot pixels (N,2) -> common-world metres (N,2).
+
+        bounds=None  -> exact analytic intersection for every pixel (unchanged).
+        bounds=(x0,y0,x1,y1) [m] -> passed through to cal.to_ground for
+        near-horizon clamping (drops out-of-bounds / upward-ray pixels)."""
         if foot_uv is None or len(foot_uv) == 0:
             return np.zeros((0, 2))
-        g = self.cal.to_ground(np.atleast_2d(np.asarray(foot_uv, float)))
+        g = self.cal.to_ground(np.atleast_2d(np.asarray(foot_uv, float)), bounds=bounds)
         return g @ self.R.T + self.t
 
 
@@ -39,8 +43,12 @@ class MultiCameraFusion:
         self.views = {v.name: v for v in views}
         self.r = float(assoc_radius_m)
 
-    def fuse(self, dets_by_view: dict) -> dict:
+    def fuse(self, dets_by_view: dict, bounds=None) -> dict:
         """dets_by_view: {view_name: foot_uv (N,2)} -> fused world people.
+
+        bounds=None  -> exact analytic intersection for every pixel (unchanged).
+        bounds=(x0,y0,x1,y1) [m] -> passed through to each view's to_world for
+        near-horizon clamping (drops out-of-bounds / upward-ray pixels).
 
         Returns fused centroids (M,2), per-cluster contributing views, and counts
         (n_fused unique people; multi_view = people confirmed by >1 camera).
@@ -50,7 +58,7 @@ class MultiCameraFusion:
             v = self.views.get(name)
             if v is None:
                 continue
-            for p in v.to_world(d):
+            for p in v.to_world(d, bounds=bounds):
                 pts.append((name, p))
 
         clusters = []  # {pts:[xy], views:set, centroid:xy}
