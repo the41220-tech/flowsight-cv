@@ -43,6 +43,33 @@ Overall ~**70%** of the hard tech; physics moat ~**90%**.
 - 신규 테스트 2개 → **전체 29/29 통과** (moat2 12 + anomaly 10 + wildtrack 7). fugu 리뷰 통과.
 - 백로그: **E② 7뷰 전체 정량 평가(MODA/MODP)**이 다음.
 
+### Cycle 3 (2026-06-23) — recall 개선 실험 결론
+- **목표:** ~10% recall을 7캠+SAHI로 개선 시도.
+- **가용 카메라:** C1(CVLab1), C2(CVLab2), C4(CVLab4), C5(IDIAP1) — 4/7개  
+  C3, C6, C7은 fixedWT.zip의 손상된 세그먼트에 있어 unzip/7z 모두 실패 (복구 불가).
+- **카메라 위치 문제:** CVLab1 (9.10, -5.84, 2.89)m ≈ CVLab4 (9.00, -5.85, 2.77)m → 거의 동일 위치,  
+  실질적으로 독립 시점은 3개뿐.
+- **4cam+SAHI 결과 (CONF=0.4, 20 frames, GT=637):**
+
+  | 방법 | prec | recall | fp | tp | fn |
+  |------|------|--------|----|----|-----|
+  | 1cam+SAHI | 0.124 | 0.069 | 310 | 44 | 593 |
+  | 4cam+SAHI | 0.046 | **0.089** | **1195** | 57 | 580 |
+  | baseline 2cam (no SAHI) | — | **0.102** | — | 65 | — |
+
+- **결론: SAHI가 recall을 오히려 낮춤.** FP가 1195개로 폭발 (TP 57개 대비 21배).  
+  4캠으로 TP는 54→57 (+3개) 증가했으나 precision 4.6%로 붕괴.
+- **근본 원인 (detection-method gap):**
+  1. FT-2 (드론 도메인 fine-tune) → WILDTRACK 지상 카메라에서 도메인 불일치 → FP 폭발
+  2. SAHI 슬라이스가 배경 패턴을 사람으로 오탐 (low-altitude ground-level camera와 궁합 나쁨)
+  3. 가용 4카메라 중 2개가 거의 동일 위치 → 커버리지 증가 없음
+- **진짜 fix는 데이터/모델 문제, geometry 문제 아님:**
+  - 완전한 7카메라 커버리지: WILDTRACK 원본 재다운로드 (Kaggle `aryashah2k/large-scale-multicamera-detection-dataset` 또는 EPFL 직접)
+  - 도메인 적합 detector: MVDet 등 learned multi-view detector (SOTA recall ~90%)
+  - OR CONF 상향 (0.6+) → FP 감소; 단 recall도 낮아질 수 있음
+- **geometry moat는 여전히 유효:** localization error 0.47m (매우 정확). 문제는 탐지기 성능.
+- 백로그: **E② 7뷰 MODA/MODP** → 완전한 WILDTRACK 재취득 후 수행.
+
 ### Code fixes (Cycle 1, in repo `flowsight/geometry/wildtrack.py`, NOT yet pushed)
 - Fixed 3 integration bugs (would have crashed/wrecked the first real run): positionID origin
   `-900→-90`; `wildtrack_validate.py` double-projection (now passes foot **pixels** to `fuse`);
@@ -68,7 +95,7 @@ Overall ~**70%** of the hard tech; physics moat ~**90%**.
 All 2026-06-23 changes (Cycle 1 + Cycle 2) are saved locally but **not committed/pushed**:
 ```bash
 cd ~/Desktop/magi/flowsight-cv && rm -f .git/index.lock .git/HEAD.lock
-git add -A && git commit -m "Cycle 2: bounds wiring wildtrack_validate + multicam; WILDTRACK clamp + final report + roadmap loop; tests 29/29" && git push
+git add -A && git commit -m "Cycle 2+3: bounds wiring wildtrack_validate + multicam; WILDTRACK clamp + final report + roadmap loop; 4cam+SAHI recall exp (0.089<baseline 0.102); tests 29/29" && git push
 ```
 Files changed (cumulative): `flowsight/geometry/wildtrack.py`, `flowsight/geometry/multicam.py`, `experiments/wildtrack_validate.py`, `experiments/wildtrack_selftest.py`, `experiments/__init__.py`, `tests/test_wildtrack.py`, `tests/test_moat2.py`, `docs/{wildtrack_validation_2026-06-23,FINAL_REPORT_2026-06-23,ROADMAP_LOOP}.md`, `HANDOFF.md` (+ earlier-pending `flowsight/anomaly/{alarm_gate,__init__}.py`, `tests/test_anomaly.py`, violence_train top1 fix).
 
