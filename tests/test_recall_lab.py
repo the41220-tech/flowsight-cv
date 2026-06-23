@@ -87,6 +87,96 @@ def test_lab_registry_and_loop():
     assert "DEFERRED" in rec["verdict"] and rec["spec"]
 
 
+def _mock_detect(gboxes, score=0.9):
+    """detect(region)->local boxes for GT fully inside the region (Cycle-5 mock)."""
+    def detect(region):
+        x0, y0, x1, y1 = region
+        out = []
+        for b in np.atleast_2d(gboxes):
+            if b[0] >= x0 and b[1] >= y0 and b[2] <= x1 and b[3] <= y1:
+                out.append([b[0] - x0, b[1] - y0, b[2] - x0, b[3] - y0, score])
+        return np.array(out).reshape(-1, 5)
+    return detect
+
+
+def test_tiling_remap_accuracy():
+    """Acceptance #1: tile->detect->remap->WBF recovers global coords (IoU>=0.99)."""
+    from flowsight.eval.tiling import run_tiled
+    gt = np.array([100.0, 100.0, 140.0, 160.0])
+    out = run_tiled(_mock_detect(gt[None, :]), (400, 400), slice=256, overlap=0.2)
+    assert len(out) >= 1
+    assert sm.iou_matrix(out[:, :4], gt[None, :])[:, 0].max() >= 0.99
+
+
+def test_tiling_wbf_merges_crosstile():
+    """Acceptance #2: a box seen in two overlapping tiles fuses to ONE box."""
+    from flowsight.eval.tiling import run_tiled
+    gt = np.array([220.0, 100.0, 250.0, 160.0])               # lies in x-tile overlap
+    out = run_tiled(_mock_detect(gt[None, :]), (400, 400), slice=256, overlap=0.2)
+    assert len(out) == 1
+    assert sm.iou_matrix(out[:, :4], gt[None, :])[:, 0].max() >= 0.99
+
+
+def test_tiling_recovers_small_via_lab():
+    """Acceptance #3: whole-image (downscaled) misses small; tiled recovers ->
+    ΔRecall@matched-FPPI > 0 through the lab Comparator."""
+    from flowsight.eval.tiling import run_tiled
+    rng = np.random.default_rng(0)
+    W = H = 800
+    gts, whole, tiled = [], [], []
+    for _ in range(6):
+        cx = rng.uniform(80, 720, 4); cy = rng.uniform(80, 720, 4); s = 16.0
+        g = np.column_stack([cx - s/2, cy - s/2, cx + s/2, cy + s/2])
+        gts.append(g)
+        whole.append(np.zeros((0, 5)))                         # whole-frame misses small
+        tiled.append(run_tiled(_mock_detect(g), (W, H), slice=256, overlap=0.2))
+    c = sm.compare_at_matched_fppi(whole, tiled, gts, target_fppi=1.0)
+    assert c["recall_base"] == 0.0 and c["recall_var"] > 0.0 and c["delta_recall"] > 0.0
+
+
+def test_bodyprior_geometry_and_monotonic():
+    """Acceptance #1: head->body recovers the full body (IoU>=0.9); foot monotonic in k."""
+    from flowsight.eval.body_prior import head_to_body, head_to_foot
+    head = np.array([[110.0, 100.0, 130.0, 140.0]])           # h=40, w=20
+    body = head_to_body(head, k=7.5, w_ratio=2.0)
+    gt_body = np.array([[100.0, 100.0, 140.0, 400.0]])         # 7.5 head-heights tall
+    assert sm.iou_matrix(body, gt_body)[0, 0] >= 0.9
+    assert head_to_foot(head, 8.0)[0, 1] > head_to_foot(head, 7.0)[0, 1]
+
+
+def test_bodyprior_recovers_occluded_via_lab():
+    """Acceptance #2: heads recover foot-occluded people -> ΔRecall@matched-FPPI > 0."""
+    from flowsight.eval.body_prior import merge_head_proposals
+    rng = np.random.default_rng(0)
+    gts, person, merged = [], [], []
+    for _ in range(8):
+        n = 6
+        cx = rng.uniform(120, 680, n); top = rng.uniform(60, 280, n); bh, bw = 200.0, 40.0
+        body = np.column_stack([cx - bw/2, top, cx + bw/2, top + bh]); gts.append(body)
+        occluded = rng.random(n) < 0.5
+        pd, hd = [], []
+        for i in range(n):
+            hd.append([cx[i] - 10, top[i], cx[i] + 10, top[i] + bh/7.5, 0.8])   # head visible
+            if not occluded[i]:
+                pd.append([*body[i], 0.9])                     # body detector misses occluded
+        pd = np.array(pd).reshape(-1, 5); hd = np.array(hd).reshape(-1, 5)
+        person.append(pd)
+        merged.append(merge_head_proposals(pd, hd, k=7.5, w_ratio=2.0))
+    c = sm.compare_at_matched_fppi(person, merged, gts, target_fppi=1.0)
+    assert c["delta_recall"] > 0 and c["recall_var"] > c["recall_base"]
+
+
+def test_bodyprior_contract_and_dedup():
+    """Acceptance #3: callable/empty robustness + no double-count on existing person."""
+    from flowsight.eval.body_prior import merge_head_proposals
+    person = np.array([[100.0, 100.0, 140.0, 400.0, 0.9]])
+    assert len(merge_head_proposals(person, np.zeros((0, 5)))) == 1          # empty heads -> unchanged
+    assert len(merge_head_proposals(np.zeros((0, 5)),
+                                    np.array([[10.0, 0.0, 30.0, 27.0, 0.8]]))) == 1  # heads only
+    head_over = np.array([[110.0, 100.0, 130.0, 140.0, 0.8]])                # body prop == person
+    assert len(merge_head_proposals(person, head_over, dedup_iou=0.4)) == 1  # deduped
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
