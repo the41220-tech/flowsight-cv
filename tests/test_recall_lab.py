@@ -177,6 +177,51 @@ def test_bodyprior_contract_and_dedup():
     assert len(merge_head_proposals(person, head_over, dedup_iou=0.4)) == 1  # deduped
 
 
+def test_realdata_parser_and_eval():
+    """Cycle7 prep: WILDTRACK 2D-GT parse + slice tags + eval_view wiring (mock detector)."""
+    import json
+    import os
+    import tempfile
+    from experiments.recall_realdata import (eval_view, gt_boxes_for_view, load_view,
+                                             slice_tags)
+    anno = [   # small boxes (h=40) so tiling can fully contain them (tiling = small-obj lever)
+        {"personID": 1, "positionID": 10, "views": [
+            {"viewNum": 0, "xmin": 100, "ymin": 100, "xmax": 140, "ymax": 140},
+            {"viewNum": 1, "xmin": -1, "ymin": -1, "xmax": -1, "ymax": -1}]},
+        {"personID": 2, "positionID": 11, "views": [
+            {"viewNum": 0, "xmin": 120, "ymin": 100, "xmax": 160, "ymax": 138},   # overlaps p1
+            {"viewNum": 1, "xmin": 200, "ymin": 50, "xmax": 230, "ymax": 90}]},   # small in view1
+        {"personID": 3, "positionID": 12, "views": [
+            {"viewNum": 0, "xmin": 500, "ymin": 300, "xmax": 540, "ymax": 340},
+            {"viewNum": 1, "xmin": -1, "ymin": -1, "xmax": -1, "ymax": -1}]},
+    ]
+    d = tempfile.mkdtemp()
+    os.makedirs(os.path.join(d, "annotations_positions"))
+    json.dump(anno, open(os.path.join(d, "annotations_positions", "00000000.json"), "w"))
+    g0 = gt_boxes_for_view(os.path.join(d, "annotations_positions", "00000000.json"), 0)
+    g1 = gt_boxes_for_view(os.path.join(d, "annotations_positions", "00000000.json"), 1)
+    assert len(g0) == 3 and len(g1) == 1                       # view-1: only p2 visible
+    assert "occluded" in slice_tags(g0)                        # p1/p2 overlap
+    fids, gts, gsl, imgs = load_view(d, "C1", 10)
+    assert len(fids) == 1 and len(gts[0]) == 3
+
+    def whole_for(i):
+        return np.array([[100, 100, 140, 140, 0.9]])           # whole-frame finds only p1
+
+    def tiled_detect_for(i):
+        def detect(region):
+            x0, y0, x1, y1 = region
+            out = [[b[0]-x0, b[1]-y0, b[2]-x0, b[3]-y0, 0.8] for b in gts[0]
+                   if b[0] >= x0 and b[1] >= y0 and b[2] <= x1 and b[3] <= y1]
+            return np.array(out).reshape(-1, 5)
+        return detect
+
+    rep, _, _ = eval_view(whole_for, tiled_detect_for, [(800, 600)], [gts[0]], [gsl[0]],
+                          target_fppis=(1.0,), slice_kw={"slice": 256, "overlap": 0.2})
+    c = rep["matched_fppi"][1.0]
+    assert c["recall_var"] >= c["recall_base"] and "slice_recall" in rep["whole"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
