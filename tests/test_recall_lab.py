@@ -222,6 +222,48 @@ def test_realdata_parser_and_eval():
     assert c["recall_var"] >= c["recall_base"] and "slice_recall" in rep["whole"]
 
 
+def _proj3d(K, rvec, tvec, xyz_m):
+    import cv2
+    P = (np.atleast_2d(np.asarray(xyz_m, float)) * 100.0)
+    uv, _ = cv2.projectPoints(P, np.asarray(rvec, float), np.asarray(tvec, float),
+                              np.asarray(K, float), np.zeros(5))
+    return uv.reshape(-1, 2)
+
+
+def test_anchor_foot_recovers_ground_visible():
+    """Cycle8: with feet VISIBLE, foot anchor (alpha=1) recovers the ground pos."""
+    import tempfile
+    from experiments.wildtrack_selftest import build_scene
+    from flowsight.eval.anchor_proj import median_err
+    with tempfile.TemporaryDirectory() as d:
+        cams, raw = build_scene(d)
+        cam = cams["CVLab1"]; K, rvec, tvec = raw["CVLab1"]
+        W = np.array([[3.0, 17.0]])
+        feet = _proj3d(K, rvec, tvec, [[3, 17, 0]])[0]
+        head = _proj3d(K, rvec, tvec, [[3, 17, 1.7]])[0]
+        cx = (feet[0] + head[0]) / 2
+        box = np.array([[cx - 10, head[1], cx + 10, feet[1]]])
+        assert median_err(cam, box, W, 1.0) < 0.2          # foot anchor ~ground
+
+
+def test_anchor_calibrated_beats_foot_when_occluded():
+    """Cycle8: feet OCCLUDED (bbox stops at knee) -> calibrated alpha beats foot."""
+    import tempfile
+    from experiments.wildtrack_selftest import build_scene
+    from flowsight.eval.anchor_proj import calibrate_alpha, median_err
+    with tempfile.TemporaryDirectory() as d:
+        cams, raw = build_scene(d)
+        cam = cams["CVLab1"]; K, rvec, tvec = raw["CVLab1"]
+        W = np.array([[3.0, 17.0]])
+        head = _proj3d(K, rvec, tvec, [[3, 17, 1.7]])[0]
+        knee = _proj3d(K, rvec, tvec, [[3, 17, 0.5]])[0]
+        cx = head[0]
+        box_occ = np.array([[cx - 10, head[1], cx + 10, knee[1]]])   # bottom = knee, not feet
+        foot_err = median_err(cam, box_occ, W, 1.0)
+        _, best_err = calibrate_alpha(cam, box_occ, W, grid=np.linspace(0.5, 2.5, 81))
+        assert best_err < foot_err and foot_err > 0.2      # calibrated recovers, foot errs
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
