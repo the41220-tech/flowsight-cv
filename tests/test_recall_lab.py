@@ -394,6 +394,39 @@ def test_world_nms_recovers_multicam_precision():
     assert nms["recall"] >= pooled["recall"] - 0.02         # recall preserved
 
 
+def test_multicam_precision_runner_wiring():
+    """Cycle13: the real multi-cam precision runner's testable core `eval_fused` wires camera
+    projection + (greedy | world-NMS) fusion + GT matching end-to-end on synthetic cameras.
+    Two views see the same 3 people; both fusion methods should recover them (recall@2m high)
+    and return valid recall/precision in [0,1]."""
+    import tempfile
+    from experiments.wildtrack_selftest import build_scene, project
+    from experiments.multicam_precision import eval_fused
+    with tempfile.TemporaryDirectory() as d:
+        cams, raw = build_scene(d)                       # CVLab1, CVLab2
+        W = np.array([[1.0, 8.0], [4.0, 20.0], [6.0, 30.0]])
+
+        def boxes(nm):
+            K, rv, tv = raw[nm]
+            bs = []
+            for (x, y) in W:
+                ft = project(K, rv, tv, [[x, y]])[0]     # foot pixel (ground z=0)
+                bs.append([ft[0] - 8, ft[1] - 60, ft[0] + 8, ft[1], 0.9])
+            return np.array(bs)
+
+        cam_map = {"C1": cams["CVLab1"], "C2": cams["CVLab2"],
+                   "C4": cams["CVLab1"], "C5": cams["CVLab1"]}     # C4/C5 unused (empty dets)
+        astar = {"C1": 1.0, "C2": 1.0, "C4": 1.0, "C5": 1.0}
+        dets = {"C1": [boxes("CVLab1")], "C2": [boxes("CVLab2")],
+                "C4": [np.zeros((0, 5))], "C5": [np.zeros((0, 5))]}
+        for method in ("greedy", "nms"):
+            R = eval_fused(cam_map, astar, dets, [W], anchor="calib", method=method, radius=1.5)
+            assert set(R) == {"@1", "@2"}
+            for rec, prec in R.values():
+                assert 0.0 <= rec <= 1.0 and 0.0 <= prec <= 1.0
+            assert R["@2"][0] > 0.5                       # most of the 3 people recovered @2m
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
