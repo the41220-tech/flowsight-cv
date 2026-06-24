@@ -357,6 +357,43 @@ def test_weighted_fusion_beats_unweighted_with_noisy_camera():
         assert wt["mean_loc_err_m"] < unw["mean_loc_err_m"]     # inverse-variance centroid
 
 
+def test_world_nms_dedups_crossview_duplicates():
+    """H3+ (Cycle13): world-space confidence NMS collapses cross-view duplicates of one
+    person (scattered within radius) to a single best detection, while keeping distinct
+    people. This is the multi-cam PRECISION fix. Falsifiable: fails if duplicates survive
+    or the distinct person is removed."""
+    from flowsight.geometry.multicam import world_nms
+    # 3 projections of the SAME person (different cameras, scattered < 1 m) + 1 distinct person 4 m away
+    pts = np.array([[2.0, 2.0], [2.3, 2.1], [1.8, 2.4], [6.0, 6.0]])
+    sc = np.array([0.9, 0.7, 0.6, 0.8])
+    keep = world_nms(pts, sc, radius=1.0)
+    assert len(keep) == 2                 # 3 duplicates -> 1, plus the distinct one
+    assert 0 in keep and 3 in keep        # kept the highest-conf duplicate + the distinct person
+    # tighter radius keeps more (less merging) -> here 0.2 m leaves the 3 dupes apart
+    assert len(world_nms(pts, sc, radius=0.2)) == 4
+
+
+def test_world_nms_recovers_multicam_precision():
+    """Cycle13: pooling N cameras' detections (each person seen by all N with projection
+    noise) without dedup tanks precision (~1/N); world-space confidence NMS collapses the
+    duplicates to ~one-per-person, RECOVERING precision at preserved recall. Quantifies
+    the multi-cam precision fix that sigma-gating could not provide on real data."""
+    from flowsight.geometry.multicam import world_nms
+    from flowsight.geometry.wildtrack import match_to_gt
+    rng = np.random.default_rng(0)
+    gt = np.array([[x, y] for x in range(0, 12, 3) for y in range(0, 30, 5)], float)
+    pts, sc = [], []
+    for _cam in range(4):                                   # 4 cameras each see every person
+        for g in gt:
+            pts.append(g + rng.normal(0, 0.5, 2)); sc.append(rng.uniform(0.3, 0.95))
+    pts = np.array(pts); sc = np.array(sc)
+    pooled = match_to_gt(pts, gt, 1.0)                      # naive pool, no dedup (~4x over-count)
+    nms = match_to_gt(pts[world_nms(pts, sc, 1.0)], gt, 1.0)
+    assert pooled["precision"] < 0.30                       # pooling ~24/96 = 0.25
+    assert nms["precision"] > pooled["precision"] + 0.3     # precision recovered (>=0.6)
+    assert nms["recall"] >= pooled["recall"] - 0.02         # recall preserved
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

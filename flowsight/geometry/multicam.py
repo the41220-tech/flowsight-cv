@@ -59,6 +59,30 @@ class CameraView:
         return w, sig, valid
 
 
+def world_nms(points, scores, radius: float = 1.0):
+    """Cycle13: greedy world-space NMS. Sort detections by confidence; keep the top
+    one, suppress every OTHER detection within `radius` metres (regardless of source
+    camera), repeat. This collapses cross-view DUPLICATES of one person to a single
+    best detection — the precision fix the calibrated/greedy fusion lacked (its
+    'never merge same view' rule left same-person projections from different cameras
+    as separate clusters when their projection error exceeded the assoc radius).
+    Returns the kept indices (into `points`)."""
+    pts = np.atleast_2d(np.asarray(points, float)) if len(points) else np.zeros((0, 2))
+    if not len(pts):
+        return []
+    sc = np.asarray(scores, float)
+    order = np.argsort(-sc)
+    suppressed = np.zeros(len(pts), bool)
+    keep = []
+    for i in order:
+        if suppressed[i]:
+            continue
+        keep.append(int(i))
+        d = np.linalg.norm(pts - pts[i], axis=1)
+        suppressed |= d <= radius          # suppress neighbours (incl. self; already kept)
+    return keep
+
+
 class MultiCameraFusion:
     def __init__(self, views, assoc_radius_m: float = 1.5) -> None:
         self.views = {v.name: v for v in views}
