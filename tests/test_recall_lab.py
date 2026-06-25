@@ -444,6 +444,30 @@ def test_bev_vote_multiview_agreement_filters_singlecam_fp():
     assert len(lo) >= 2                                   # low thr keeps the lone FP too
 
 
+def test_h2_geometry_project_world_and_bev_grid():
+    """Cycle16 (H2 foundation): project_world inverts to_ground (world->pixel->world round-trips
+    <5cm), bev_projection_grid maps BEV cells to in-view pixels in [-1,1], and bev_gt_heatmap
+    peaks ~1 at the GT cell. Pure-numpy geometry the trained MVDet net depends on (no torch)."""
+    import tempfile
+    from experiments.wildtrack_selftest import build_scene
+    from flowsight.eval.bev_gt import bev_grid_centres, bev_gt_heatmap, bev_projection_grid
+    with tempfile.TemporaryDirectory() as d:
+        cams, raw = build_scene(d)
+        cam = cams["CVLab1"]
+        W = np.array([[3.0, 17.0], [1.0, 8.0], [6.0, 30.0]])
+        uv = cam.project_world(W)                              # world (Z=0) -> pixel
+        back = cam.to_ground(uv)                               # pixel -> world
+        assert np.max(np.linalg.norm(back - W, axis=1)) < 0.05   # <5 cm round-trip (forward==inverse)
+        bounds = (-3.0, -0.9, 9.0, 35.1)
+        grid, valid = bev_projection_grid(cam, bounds, 0.5, (1920, 1080))
+        assert valid.any() and grid.shape[2] == 2 and np.isfinite(grid[valid]).all()
+        hm = bev_gt_heatmap(np.array([[3.0, 17.0]]), bounds, 0.5, 0.5)
+        assert hm.max() > 0.9     # peak ~1 at the person (slightly <1 when GT falls between cells)
+        centres, gh, gw = bev_grid_centres(bounds, 0.5)
+        iy, ix = np.unravel_index(int(hm.argmax()), hm.shape)
+        assert abs(centres[iy, ix, 0] - 3.0) < 0.6 and abs(centres[iy, ix, 1] - 17.0) < 0.6
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

@@ -78,6 +78,22 @@ class WildtrackCamera:
         project to thousands of metres). Returns only the surviving (M,2) points."""
         return self.to_plane(uv, 0.0, bounds)
 
+    def project_world(self, xyz_m: np.ndarray) -> np.ndarray:
+        """World points (N,3) [or (N,2) on Z=0] in METRES -> pixels (N,2) (forward map).
+
+        OpenCV pinhole: Pc = R @ Pw + t (world units), uv = K @ Pc / Pc_z. This is the
+        view<-world map an MVDet-style detector needs to build the BEV->view grid_sample
+        coordinates (project each BEV ground cell into every camera). Inverse of to_ground."""
+        P = np.atleast_2d(np.asarray(xyz_m, float))
+        if not len(P):
+            return np.zeros((0, 2))
+        if P.shape[1] == 2:
+            P = np.column_stack([P, np.zeros(len(P))])
+        Pw = (P / self.s)                       # metres -> world units (cm)
+        Pc = (self.R @ Pw.T).T + self.t[None, :]
+        uvw = (self.K @ Pc.T).T
+        return uvw[:, :2] / uvw[:, 2:3]
+
     # multicam.MultiCameraFusion only needs to_ground; the world frame IS common
     # across WILDTRACK cameras, so CameraView(R=I, t=0) wraps this directly.
     def velocity_to_metric(self, uv, v_px):
