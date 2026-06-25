@@ -102,3 +102,6 @@ fugu 핵심: (1) n=1 런으론 "데이터=천장" 결론 불가(시드/CI 필요
 ## Cycle 17d — 대시보드(모트 구동) 먼저 + 검출기 엄밀평가 병행 (user: 둘 다)
 대시보드 우선: flowsight/physics/moat_dashboard.py — frame_risk(xy_m,vel_m,bounds) → 검증된 Helbing 압력장(per_person P, p_max)으로 사람별 위험색(안전/주의/위험, 0.02/s² 절대임계) + ko_banner("사람 N명·위험도 X·위험 N명"). 즉 대시보드 '위험'을 raw 속도가 아니라 물리 모트로 구동(fugu가 지목한 진짜 모트). tests/test_moat_dashboard.py 2/2 PASS(밀집·불규칙 군집→위험, 고립·정지→안전). 비디오 렌더러(dashboard2_build 구조)가 이 함수를 호출하도록 연결만 하면 됨(Colab 트래킹).
 검출기 병행: train_mvdet2.py 리뷰반영 수정 완료(GroupNorm/FrozenBN/cosine/grad-accum/seed) — fugu #1 엄밀평가(시드3+학습곡선+카메라스윕+PR/제품지표, Drive 영구화)는 Colab 장기런으로 후속.
+
+## Cycle 17e — 모트 구동 대시보드 렌더러 연결
+experiments/dashboard_moat_run.py: tracks_<type>.json(px 발좌표+px/s) → WILDTRACK 캘리브(foot px→world m, per-id world델타→m/s) → moat_dashboard.frame_risk → 좌(실영상)|우(위험색 점, 안전/주의/위험 절대 0.02/s²) + 한국어 배너. 미터변환 코어 metric_tracks는 numpy-only로 샌드박스 검증(군집→위험, 고립→안전, 배너 정상). cv2/PIL 렌더는 Colab. 즉 대시보드 '위험'이 검출기 점수가 아니라 검증된 압사압력으로 구동(fugu 지향). 다음: Colab에서 실제 데모 영상 렌더(트랙+캘리브 필요) / 검출기 엄밀평가 병행.
