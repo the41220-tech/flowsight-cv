@@ -60,3 +60,15 @@
   - **스모크 결과(Colab T4, 6.8GB 재다운로드 없이 Drive 부분집합, push 확인):** 4뷰·20프레임·20에폭, ResNet18@360×640. **loss 3706→9 수렴.** @2m thr0.3 recall 0.000(미학습 peak<0.3)이나 **thr0.05 recall 0.844 precision 0.033 (tp297 fn55 fp8635).** *판정*: MVDet H2 구현 **정확+모델 학습 확인**(recall 0.844=297/352 검출 → per-view feat→BEV투영→융합→head→focal loss 전 경로 작동). **recall 0.844가 late-fusion(0.523) 초과 → recall 천장 돌파 가능 입증(H2 전제 확인).** precision 0.033(fp8635)은 20프레임 과적합+peak-NMS 없음+thr 미보정 탓. *엔지니어링 수정*: train_mvdet 예측 peak에 peak-NMS(world_nms 재사용)+thr 보정 추가 후 풀 7뷰×400 학습(7뷰 전체 Drive 1회 재추출+GPU).
 - **제품 방향(사용자, 중요): 실전엔 카메라 7개가 드물다 → 4뷰를 상한으로 최적화.** 7뷰 추격 중단, 타깃 regime=4뷰(C1/C2/C4/C5, Drive에 있는 그대로). 개선은 카메라 추가가 아니라 4뷰에서 프레임/에폭/튜닝.
 - **Cycle 16b (2026-06-24, 완료) — peak-NMS + thr 스윕 추가(스모크 precision 수정).** 스모크 fp8635 원인=미학습 확산 heatmap이 프레임당 수백 local maxima. 수정: `train_mvdet.peaks(...,radius)`가 3×3 local-max→`world_nms`(heat값 기준, radius m)로 blob 다중maxima 축소; eval은 test heatmap 1회 캐시 후 thr(0.1~0.7) 스윕으로 recall/precision/f1 프론티어 출력(--nms 기본 1.0m). 샌드박스(확산 2-blob+노이즈): no-NMS 6→NMS 2(blob당 1). **58 테스트 통과.** *다음*: 같은 4뷰 스모크 Colab 재측정(Drive, 다운로드 0) → 고-thr/NMS 운영점서 precision≫0.033 기대(recall은 0.844서 트레이드). 이후 4뷰 regime 개선(프레임+에폭).
+
+## Cycle 16b — MVDet 4-view peak-NMS+thr sweep (실데이터 재측정, T4 40ep)
+Views C1,C2,C4,C5 (product steer: 4뷰 상한). BEV occupancy net, peak-NMS=1.0m, @2m match.
+thr sweep (단일 학습 net, thr만 변경):
+- 0.02/0.03: R0.764 P0.087 (tp269 fn83 fp2809)  ← 압사/크라우드 경보 (고recall)
+- 0.05:      R0.597 P0.304 F1 0.403 (tp210 fn142 fp480)  ← 최고 F1
+- 0.07:      R0.250 P0.704 (tp88 fn264 fp37)  ← 트래킹 (고precision)
+- 0.10:      R0.088 P1.000 (tp31 fn321 fp0)   ← 무-오경보
+- 0.15:      R0.014 P1.000 (fp0)
+대조 baseline (no-NMS, thr0.05): R0.844 P0.033 fp8635.
+WIN: peak-NMS가 thr0.05에서 fp 8635→480 (18×↓), precision 0.033→0.304 (9.2×). 모든 동작점이 구 동작점을 지배. 단일 net으로 경보↔트래킹 프론티어 튜닝 가능.
+한계/다음: 서브셋 40프레임(20 train/20 test)으로 미학습 → 프레임수↑/에폭↑/backbone↑/aug로 프론티어 전체 상향 여지. 7뷰 추격은 중단(product steer).
