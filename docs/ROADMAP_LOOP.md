@@ -72,3 +72,14 @@ thr sweep (단일 학습 net, thr만 변경):
 대조 baseline (no-NMS, thr0.05): R0.844 P0.033 fp8635.
 WIN: peak-NMS가 thr0.05에서 fp 8635→480 (18×↓), precision 0.033→0.304 (9.2×). 모든 동작점이 구 동작점을 지배. 단일 net으로 경보↔트래킹 프론티어 튜닝 가능.
 한계/다음: 서브셋 40프레임(20 train/20 test)으로 미학습 → 프레임수↑/에폭↑/backbone↑/aug로 프론티어 전체 상향 여지. 7뷰 추격은 중단(product steer).
+
+## Cycle 17 — MVDet2 4-view 한계돌파 5가설 (Opus→fugu비판→실데이터)
+가설: Opus 제안 → fugu 통과 HA=깊은특징(H2), HB=증강(H4), HC=freeze+WD(R1), HD=캘리브정렬(R2), HE=train-thr(R3). 탈락 H1해상도/H3σ축소/H5TTA(미래누설+hflip 기하파괴).
+실데이터(C1C2C4C5, 40ep, peak-NMS) best-F1 (baseline 0.471, 본 스크립트 auto_calib 클램프로 16b 0.403보다↑):
+- HA 깊은특징 0.492 (P0.450→0.511, fp213→160) ★유일 상승 +0.021
+- HB 증강 0.355 (fp682) 기각 — 20프레임에 dropout이 노이즈
+- HC freeze+WD 0.339 (fp2991) 기각 최대하락 — 백본 fine-tune이 정규화보다 중요 (단 thr0.02 R0.835 순수recall 최고)
+- HD 캘리브정렬 0.455 중립 — 5프레임 probe가 이미 안정매핑 → 병목아님
+- HE train-thr 채택(방법론): CV택 thr0.07 nms0.5 → TEST F1 0.418 vs oracle 0.436 (−0.018) = test누설없는 정직 선택 검증
+핵심: 20 train프레임 분산이 커 5중 3 퇴보 → **진짜 천장=데이터양**. 다음: Drive 전400프레임으로 증량 후 HA 시드반복 확인 → 대시보드 연결. 보고서 docs/CYCLE17_MVDET2_HYP_REPORT_2026-06-25.md.
+운영: 런타임 재활용으로 /content/WTx 소실 → Drive(MyDrive/WTx)에서 cp 복구(FUSE ~9분). base64 6KB 타이핑은 손상 → push+reclone이 견고.
