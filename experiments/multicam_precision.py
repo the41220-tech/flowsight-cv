@@ -29,9 +29,11 @@ import os
 import numpy as np
 
 from flowsight.eval.anchor_proj import bbox_anchor, calibrate_alpha, project_head
-from flowsight.geometry.multicam import world_nms
+from flowsight.geometry.multicam import world_nms, bev_vote
 from flowsight.geometry.wildtrack import load_camera, match_to_gt, positionid_to_world
 from experiments.anchor_lab import NAMES, _cam, load_pairs
+
+GROUND_BOUNDS = (-3.0, -0.9, 9.0, 35.1)   # WILDTRACK plaza extent (m) for BEV voting
 
 # C3/C6/C7 zips are historically corrupt; use the four clean views.
 VIEWS = [("C1", 0), ("C2", 1), ("C4", 3), ("C5", 4)]
@@ -112,10 +114,13 @@ def eval_fused(cams, astar, dets_by_view, gtw_list, anchor="calib", method="nms"
                 s = det[:, 4] if det.shape[1] > 4 else np.ones(len(w))
                 for p, sv in zip(w, s):
                     items.append((vw, p, float(sv)))
-            if method == "nms":
+            if method in ("nms", "bev"):
                 P = np.array([p for _n, p, _s in items]) if items else np.zeros((0, 2))
                 S = np.array([s for _n, _p, s in items]) if items else np.zeros(0)
-                fused = P[world_nms(P, S, radius)] if len(P) else np.zeros((0, 2))
+                if method == "nms":
+                    fused = P[world_nms(P, S, radius)] if len(P) else np.zeros((0, 2))
+                else:   # bev: training-free MVDet voting; `radius` is the vote threshold
+                    fused = bev_vote(P, S, GROUND_BOUNDS, cell=0.5, sigma=1.0, thr=radius)
             else:
                 fused = _greedy([(n, p) for n, p, _s in items], assoc)
             m = match_to_gt(fused, g, rad)
@@ -163,6 +168,10 @@ def main(a):
             R = eval_fused(cams, astar, dets, gtw, anchor, "nms", rad)
             print("nms-%-5s r%.1f      @1m r%.3f p%.3f | @2m r%.3f p%.3f" %
                   (anchor, rad, *R["@1"], *R["@2"]), flush=True)
+    for thr in (0.7, 1.0, 1.5):   # H2-lite: training-free BEV occupancy voting (calib anchor)
+        R = eval_fused(cams, astar, dets, gtw, "calib", "bev", thr)
+        print("bev-calib t%.1f      @1m r%.3f p%.3f | @2m r%.3f p%.3f" %
+              (thr, *R["@1"], *R["@2"]), flush=True)
 
 
 if __name__ == "__main__":

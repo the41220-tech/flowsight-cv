@@ -59,6 +59,45 @@ class CameraView:
         return w, sig, valid
 
 
+def bev_vote(points, scores, bounds, cell: float = 0.5, sigma: float = 1.0, thr: float = 1.0):
+    """Cycle15 (training-free MVDet core): aggregate per-camera detection confidences as
+    Gaussian splats on a SHARED BEV ground grid, sum across all cameras, and keep local
+    maxima whose summed evidence exceeds `thr`. A person seen by >=2 cameras accumulates
+    ~2x evidence and survives a high `thr`; a single-camera false positive contributes ~1x
+    and is dropped -> multi-view AGREEMENT raises precision (beyond mere dedup) while
+    occlusion-fill keeps recall. This is the OUTPUT stage of an MVDet-style BEV detector
+    WITHOUT learned features (the learned-feature version is the queued H2 training).
+
+    `points` (N,2) world XY from all cameras, `scores` (N,) detector confidences, `bounds`
+    (x0,y0,x1,y1) m. The heatmap is rescaled so a single unit-score detection peaks at 1.0,
+    making `thr` interpretable in confidence units (thr~1.0 ~= "needs >=2 cameras agreeing").
+    Returns fused world peaks (M,2)."""
+    from flowsight.physics.crowd_pressure import _smooth   # scipy-or-opencv gaussian, with fallback
+    x0, y0, x1, y1 = bounds
+    gw = max(1, int(np.ceil((x1 - x0) / cell)))
+    gh = max(1, int(np.ceil((y1 - y0) / cell)))
+    pts = np.atleast_2d(np.asarray(points, float)) if len(points) else np.zeros((0, 2))
+    if not len(pts):
+        return np.zeros((0, 2))
+    sc = np.asarray(scores, float).reshape(-1)
+    acc = np.zeros((gh, gw), np.float32)
+    gx = np.clip(((pts[:, 0] - x0) / cell).astype(int), 0, gw - 1)
+    gy = np.clip(((pts[:, 1] - y0) / cell).astype(int), 0, gh - 1)
+    for k in range(len(pts)):
+        acc[gy[k], gx[k]] += sc[k]
+    sg = sigma / cell
+    heat = _smooth(acc, sg).astype(float) * (2.0 * np.pi * sg * sg)   # unit point -> peak ~1.0
+    # 3x3 local maxima (numpy, no scipy)
+    p = np.pad(heat, 1, mode="constant", constant_values=-1e18)
+    mx = np.maximum.reduce([p[i:i + gh, j:j + gw] for i in range(3) for j in range(3)])
+    ys, xs = np.where((heat >= mx - 1e-9) & (heat > thr))
+    cand = np.column_stack([x0 + (xs + 0.5) * cell, y0 + (ys + 0.5) * cell])
+    if len(cand) <= 1:
+        return cand
+    keep = world_nms(cand, heat[ys, xs], radius=max(cell, sigma))   # merge adjacent peaks of one cluster
+    return cand[keep]
+
+
 def world_nms(points, scores, radius: float = 1.0):
     """Cycle13: greedy world-space NMS. Sort detections by confidence; keep the top
     one, suppress every OTHER detection within `radius` metres (regardless of source

@@ -427,6 +427,23 @@ def test_multicam_precision_runner_wiring():
             assert R["@2"][0] > 0.5                       # most of the 3 people recovered @2m
 
 
+def test_bev_vote_multiview_agreement_filters_singlecam_fp():
+    """Cycle15 (H2-lite): training-free BEV occupancy voting keeps a person AGREED by >=2
+    cameras and DROPS a lone single-camera false positive at a high vote threshold
+    (multi-view agreement -> precision beyond dedup), while a low threshold keeps both.
+    This is the MVDet output stage without learned features."""
+    from flowsight.geometry.multicam import bev_vote
+    bounds = (-3.0, -0.9, 9.0, 35.1)
+    # person seen by 2 cameras (2 projections ~0.2 m apart) + a lone single-camera FP far away
+    pts = np.array([[3.0, 10.0], [3.2, 10.1], [7.0, 30.0]])
+    sc = np.array([0.6, 0.6, 0.6])
+    hi = bev_vote(pts, sc, bounds, cell=0.5, sigma=1.0, thr=1.0)
+    assert len(hi) == 1                                   # only the 2-camera-agreed person
+    assert abs(hi[0][0] - 3.1) < 1.5 and abs(hi[0][1] - 10.0) < 1.5
+    lo = bev_vote(pts, sc, bounds, cell=0.5, sigma=1.0, thr=0.3)
+    assert len(lo) >= 2                                   # low thr keeps the lone FP too
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
