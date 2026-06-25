@@ -468,6 +468,27 @@ def test_h2_geometry_project_world_and_bev_grid():
         assert abs(centres[iy, ix, 0] - 3.0) < 0.6 and abs(centres[iy, ix, 1] - 17.0) < 0.6
 
 
+def test_mvdet_peak_nms_collapses_diffuse_maxima():
+    """Cycle16b: peak-NMS on the predicted BEV heatmap collapses the many adjacent local maxima
+    of a diffuse (undertrained) blob into ~one peak per person -> kills the spurious FPs that
+    tanked the H2 smoke precision (fp8635). Without NMS many maxima survive; with NMS one/blob."""
+    from experiments.train_mvdet import peaks
+    rng = np.random.default_rng(0)
+    bounds = (-3.0, -0.9, 9.0, 35.1); cell = 0.1
+    gh = int(np.ceil((bounds[3] - bounds[1]) / cell)); gw = int(np.ceil((bounds[2] - bounds[0]) / cell))
+    yy, xx = np.mgrid[0:gh, 0:gw]
+    heat = np.zeros((gh, gw), float)
+    for (cyw, cxw) in [(10.0, 3.0), (28.0, 6.0)]:                  # 2 broad blobs, far apart
+        cy = (cyw - bounds[1]) / cell; cx = (cxw - bounds[0]) / cell
+        heat += 0.6 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * 8.0 ** 2)))
+    heat += 0.05 * rng.random((gh, gw))                           # noise -> many spurious maxima
+    no_nms = peaks(heat, bounds, cell, thr=0.3, radius=0)
+    with_nms = peaks(heat, bounds, cell, thr=0.3, radius=1.0)
+    assert len(no_nms) > 2                                        # diffuse blob yields many maxima
+    assert len(with_nms) == 2                                     # NMS -> one peak per blob
+    assert len(with_nms) < len(no_nms)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0

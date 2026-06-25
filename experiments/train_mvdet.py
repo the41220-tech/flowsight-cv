@@ -24,6 +24,7 @@ import numpy as np
 
 from flowsight.eval.anchor_proj import bbox_anchor
 from flowsight.eval.bev_gt import bev_grid_centres, bev_gt_heatmap, bev_projection_grid
+from flowsight.geometry.multicam import world_nms
 from flowsight.geometry.wildtrack import load_camera, match_to_gt, positionid_to_world
 from flowsight.models.mvdet import build_mvdet, focal_bev_loss
 
@@ -76,13 +77,21 @@ def gt_world(af):
     return positionid_to_world(np.array(pid)) if pid else np.zeros((0, 2))
 
 
-def peaks(heat, bounds, cell, thr):
+def peaks(heat, bounds, cell, thr, radius=1.0):
+    """BEV heatmap -> world peaks: 3x3 local maxima above `thr`, then world-space NMS
+    (suppress lower peaks within `radius` m) to collapse the diffuse multi-maxima blobs an
+    undertrained net produces -> far fewer false positives. radius<=0 disables NMS."""
     x0, y0 = bounds[0], bounds[1]
     gh, gw = heat.shape
     p = np.pad(heat, 1, mode="constant", constant_values=-1e18)
     mx = np.maximum.reduce([p[i:i + gh, j:j + gw] for i in range(3) for j in range(3)])
     ys, xs = np.where((heat >= mx - 1e-9) & (heat > thr))
-    return np.column_stack([x0 + (xs + 0.5) * cell, y0 + (ys + 0.5) * cell])
+    if not len(xs):
+        return np.zeros((0, 2))
+    cand = np.column_stack([x0 + (xs + 0.5) * cell, y0 + (ys + 0.5) * cell])
+    if radius and radius > 0:
+        cand = cand[world_nms(cand, heat[ys, xs], radius)]
+    return cand
 
 
 def main(a):
@@ -132,18 +141,22 @@ def main(a):
         print("ep %d loss %.4f" % (ep, tot / max(1, k)), flush=True)
 
     net.eval()
-    tp = fn = fp = 0
+    cache = []
     with torch.no_grad():
         for af, fid in zip(allf[te], fids[te]):
             logit = net(load_imgs(fid), grids, coord)
             logit = F.interpolate(logit, size=(Hg, Wg), mode="bilinear", align_corners=False)
-            heat = torch.sigmoid(logit)[0, 0].cpu().numpy()
-            pr = peaks(heat, BOUNDS, CELL, a.thr)
-            m = match_to_gt(pr, gt_world(af), 2.0)
+            cache.append((torch.sigmoid(logit)[0, 0].cpu().numpy(), gt_world(af)))
+    print("=== MVDET_RESULT views=%s peak-NMS=%.1fm (thr sweep) ===" % (views, a.nms), flush=True)
+    for thr in (0.1, 0.2, 0.3, 0.5, 0.7):
+        tp = fn = fp = 0
+        for heat, g in cache:
+            m = match_to_gt(peaks(heat, BOUNDS, CELL, thr, a.nms), g, 2.0)
             tp += m["tp"]; fn += m["fn"]; fp += m["fp"]
-    rec = tp / (tp + fn + 1e-9); prec = tp / (tp + fp + 1e-9)
-    print("=== MVDET_RESULT views=%s @2m recall %.3f precision %.3f (tp%d fn%d fp%d) ===" %
-          (views, rec, prec, tp, fn, fp), flush=True)
+        rec = tp / (tp + fn + 1e-9); prec = tp / (tp + fp + 1e-9)
+        f1 = 2 * rec * prec / (rec + prec + 1e-9)
+        print("thr %.2f @2m recall %.3f precision %.3f f1 %.3f (tp%d fn%d fp%d)" %
+              (thr, rec, prec, f1, tp, fn, fp), flush=True)
 
 
 if __name__ == "__main__":
@@ -155,4 +168,5 @@ if __name__ == "__main__":
     ap.add_argument("--hw", default="360,640")
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--thr", type=float, default=0.3)
+    ap.add_argument("--nms", type=float, default=1.0, help="peak-NMS radius (m); 0 disables")
     main(ap.parse_args())
