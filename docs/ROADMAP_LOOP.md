@@ -83,3 +83,18 @@ WIN: peak-NMS가 thr0.05에서 fp 8635→480 (18×↓), precision 0.033→0.304 
 - HE train-thr 채택(방법론): CV택 thr0.07 nms0.5 → TEST F1 0.418 vs oracle 0.436 (−0.018) = test누설없는 정직 선택 검증
 핵심: 20 train프레임 분산이 커 5중 3 퇴보 → **진짜 천장=데이터양**. 다음: Drive 전400프레임으로 증량 후 HA 시드반복 확인 → 대시보드 연결. 보고서 docs/CYCLE17_MVDET2_HYP_REPORT_2026-06-25.md.
 운영: 런타임 재활용으로 /content/WTx 소실 → Drive(MyDrive/WTx)에서 cp 복구(FUSE ~9분). base64 6KB 타이핑은 손상 → push+reclone이 견고.
+
+## Cycle 17b — 데이터 증량 재평가 (40→400 프레임, n=200)
+EPFL 6.8GB 재다운 → wt_extract.py(스트리밍-zip inflate, 자체테스트+fugu리뷰) 추출 WROTE2444 (4뷰×400) → 동일 스크립트 n=200(100tr/100te).
+- baseline best-F1 0.436 @thr0.03 (R0.656 P0.326); 프론티어 강화 R0.827@thr0.02 ~ P0.858@thr0.10 ~ P0.974@thr0.15
+- HA deep 0.319 (n40 0.492 승 → n200 패) ★판정 역전: 깊은net 20ep에서 5×데이터 underfit
+- HB aug ~0.407 + 최고 recall R0.860@thr0.02 (n40 0.355 최악 → n200 경쟁력) ★판정 역전: 데이터 충분→증강이 일반화로 작동
+- HC freeze 미측정(런타임 재활용으로 /content 소실)
+핵심: **데이터 10×에 가설 판정이 뒤집힘 = Cycle17의 "진짜 천장=데이터양" 실증.** 다음: deep 에폭↑ 재시도, 4뷰 프레임 Drive 영구화(재활용 대비), 대시보드 연결. 보고서 docs/CYCLE17B_DATA_SCALE_REPORT_2026-06-25.md.
+운영: EPFL zip=스트리밍(csize=0)→decompressobj inflate로 추출; Colab 런타임 idle 재활용 3회로 /content 전소→Drive 영구화 필수; GLM 토큰쿼터 소진→fugu 대체.
+
+## Cycle 17c — 리뷰 반영 아키텍처 수정 (GLM 불가→fugu+자체)
+GLM 코드리뷰: 토큰 쿼터 소진으로 빈 응답(4회) → 자체 아키텍처 리뷰로 대체. fugu 전체 비판 실시.
+fugu 핵심: (1) n=1 런으론 "데이터=천장" 결론 불가(시드/CI 필요), 판정역전=brittleness; (2) F1 0.44는 압사경보 배포 불가; (3) 누락=평가엄밀성(시드·CI·PR·오경보/h·놓침·지연·공간오차)+학습곡선+카메라vs프레임+단순베이스라인; (4) **진짜 모트=압사압력 추론, BEV검출기는 side-quest**; 컷=대시보드(지금)+n=1 강한주장.
+자체 아키텍처 리뷰→train_mvdet2.py 수정: head BatchNorm→**GroupNorm**(batch=1 버그), backbone **FrozenBN**(eval), 백본 차등LR(×0.1), **CosineAnnealingLR**, **gradient accumulation(--accum)**, **--seed**. 컴파일+임포트 OK. (deep underfit 유력근원=batch=1 BN 불안정 + 동일에폭 미수렴.)
+수정 결론: 다음은 (a) 수정코드로 시드 3회+학습곡선(20/50/100/200)+카메라스윕(2/3/4)+PR/제품지표 = fugu #1, (b) 대시보드를 검출기 대신 **검증된 압사압력 모트**로 구동(제품목표 즉시 가능). Drive 영구화는 공통 선행.

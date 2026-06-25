@@ -120,10 +120,11 @@ def build_mvdet2(n_views, deep, feat_ch=64, head_ch=128, freeze=False, pretraine
                 self.layer3 = bb.layer3  # stride16, 256ch
                 in_ch = 128 + 256
             self.compress = nn.Conv2d(in_ch, feat_ch, 1)
+            gn = lambda c: nn.GroupNorm(min(32, c), c)   # GroupNorm: batch=1-safe (BN is not)
             self.head = nn.Sequential(
-                nn.Conv2d(n_views * feat_ch + 2, head_ch, 3, padding=2, dilation=2), nn.BatchNorm2d(head_ch), nn.ReLU(True),
-                nn.Conv2d(head_ch, head_ch, 3, padding=2, dilation=2), nn.BatchNorm2d(head_ch), nn.ReLU(True),
-                nn.Conv2d(head_ch, head_ch, 3, padding=1), nn.BatchNorm2d(head_ch), nn.ReLU(True),
+                nn.Conv2d(n_views * feat_ch + 2, head_ch, 3, padding=2, dilation=2), gn(head_ch), nn.ReLU(True),
+                nn.Conv2d(head_ch, head_ch, 3, padding=2, dilation=2), gn(head_ch), nn.ReLU(True),
+                nn.Conv2d(head_ch, head_ch, 3, padding=1), gn(head_ch), nn.ReLU(True),
                 nn.Conv2d(head_ch, 1, 1),
             )
             if freeze:
@@ -132,6 +133,18 @@ def build_mvdet2(n_views, deep, feat_ch=64, head_ch=128, freeze=False, pretraine
                 if deep:
                     for p in self.layer3.parameters():
                         p.requires_grad = False
+
+        def train(self, mode=True):
+            # FrozenBN: keep pretrained backbone BatchNorm in eval (batch=1 makes BN stats unstable)
+            super().train(mode)
+            for mod in self.stem.modules():
+                if isinstance(mod, nn.BatchNorm2d):
+                    mod.eval()
+            if self.deep:
+                for mod in self.layer3.modules():
+                    if isinstance(mod, nn.BatchNorm2d):
+                        mod.eval()
+            return self
 
         def forward(self, imgs, grids, coord):
             B, V, C, H, W = imgs.shape
@@ -171,7 +184,11 @@ def main(a):
     import torch.nn.functional as F
     import cv2
 
-    rng = np.random.default_rng(0)
+    import random
+    random.seed(a.seed); np.random.seed(a.seed); torch.manual_seed(a.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(a.seed)
+    rng = np.random.default_rng(a.seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     views = a.views.split(",")
     H, W = (int(x) for x in a.hw.split(","))
@@ -210,16 +227,26 @@ def main(a):
         return t
 
     net = build_mvdet2(len(views), a.deep, freeze=a.freeze).to(dev)
-    params = [p for p in net.parameters() if p.requires_grad]
-    opt = torch.optim.Adam(params, lr=a.lr, weight_decay=a.wd)
+    # discriminative LR: backbone (pretrained) lr*0.1, head lr; cosine decay over epochs
+    bb, hd = [], []
+    for nm, p in net.named_parameters():
+        if not p.requires_grad:
+            continue
+        (bb if ("stem" in nm or "layer3" in nm) else hd).append(p)
+    opt = torch.optim.Adam([{"params": bb, "lr": a.lr * 0.1}, {"params": hd, "lr": a.lr}], weight_decay=a.wd)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=a.epochs)
     for ep in range(a.epochs):
-        net.train(); tot = 0.0
-        for af, fid in zip(allf[tr], fids[tr]):
+        net.train(); tot = 0.0; opt.zero_grad()
+        for i, (af, fid) in enumerate(zip(allf[tr], fids[tr])):
             tgt = torch.from_numpy(bev_gt_heatmap(gt_world(af), BOUNDS, CELL, 0.5)).to(dev)[None, None]
             logit = net(load_imgs(fid, True), grids, coord)
             logit = F.interpolate(logit, size=tgt.shape[-2:], mode="bilinear", align_corners=False)
-            loss = focal_bev_loss(logit, tgt)
-            opt.zero_grad(); loss.backward(); opt.step(); tot += float(loss)
+            loss = focal_bev_loss(logit, tgt) / a.accum          # grad accumulation -> effective batch
+            loss.backward(); tot += float(loss) * a.accum
+            if (i + 1) % a.accum == 0:
+                opt.step(); opt.zero_grad()
+        opt.step(); opt.zero_grad()                              # flush partial accum
+        sched.step()
         if ep % 10 == 0 or ep == a.epochs - 1:
             print("ep %d loss %.4f" % (ep, tot / max(1, k)), flush=True)
 
@@ -269,6 +296,8 @@ if __name__ == "__main__":
     ap.add_argument("--views", default="C1,C2,C4,C5")
     ap.add_argument("--n", type=int, default=40)
     ap.add_argument("--epochs", type=int, default=40)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--accum", type=int, default=4, help="gradient accumulation steps (effective batch)")
     ap.add_argument("--hw", default="360,640")
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--nms", type=float, default=1.0)
