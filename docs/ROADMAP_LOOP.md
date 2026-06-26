@@ -105,3 +105,6 @@ fugu 핵심: (1) n=1 런으론 "데이터=천장" 결론 불가(시드/CI 필요
 
 ## Cycle 17e — 모트 구동 대시보드 렌더러 연결
 experiments/dashboard_moat_run.py: tracks_<type>.json(px 발좌표+px/s) → WILDTRACK 캘리브(foot px→world m, per-id world델타→m/s) → moat_dashboard.frame_risk → 좌(실영상)|우(위험색 점, 안전/주의/위험 절대 0.02/s²) + 한국어 배너. 미터변환 코어 metric_tracks는 numpy-only로 샌드박스 검증(군집→위험, 고립→안전, 배너 정상). cv2/PIL 렌더는 Colab. 즉 대시보드 '위험'이 검출기 점수가 아니라 검증된 압사압력으로 구동(fugu 지향). 다음: Colab에서 실제 데모 영상 렌더(트랙+캘리브 필요) / 검출기 엄밀평가 병행.
+
+## Cycle 17f — 모트 대시보드 데모 영상 (샌드박스 합성 렌더)
+실데이터(WILDTRACK CVLab1) 데모를 Colab에서 4회 시도했으나 런타임 재활용이 매번 /content(다운로드·추출·clone)를 전소시켜 실패(코드버그 아님, 인프라). GLM 코드리뷰는 토큰쿼터 소진으로 빈응답. → Colab 의존을 끊고 experiments/dashboard_moat_synth.py(합성 군중, numpy+cv2+frame_risk, Noto CJK 한국어 배너)로 샌드박스에서 직접 렌더 → dashboard_moat_demo.mp4(130프레임). 좌 현장|우 위험지도: 밀집·불규칙 군집=빨강(위험), 코히어런트 흐름=초록(안전), 전이=노랑(주의), 배너 "사람54명·위험도 위험·위험30명·압력63.4/s²". 위험색이 검출기점수가 아니라 검증된 Helbing 압사압력(절대0.02/s²)으로 구동됨을 실증. frame_risk 경로는 실데이터 렌더러(dashboard_moat_run.py)와 동일 — 안정 Colab 세션 생기면 실영상에 그대로 적용. 운영교훈: Colab 인터랙티브 멀티셀은 재활용으로 사실상 불가 → 데모성 산출물은 샌드박스 렌더가 견고.
